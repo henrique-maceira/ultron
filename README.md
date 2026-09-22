@@ -111,6 +111,46 @@ O banco fica persistido em `./data/ultron.db` (volume), então suas tarefas e le
 sobrevivem a reinícios e rebuilds. Não é preciso abrir nenhuma porta — o bot usa
 long-polling.
 
+## Atualizações automáticas (fazer os ajustes subirem direto)
+
+A "ponte" entre o desenvolvimento e a sua máquina é o **GitHub**: as mudanças são enviadas
+(`push`) para a branch, e a sua máquina **puxa** (`pull`) e reconstrói o container sozinha.
+Não há acesso remoto direto à máquina — só o GitHub no meio, o que é seguro.
+
+**Atualização manual** (quando quiser):
+
+```powershell
+# Windows (PowerShell), na pasta do projeto:
+./scripts/update.ps1
+```
+```bash
+# Linux / macOS / WSL:
+bash scripts/update.sh
+```
+O script puxa a branch e **só reconstrói se houver mudança** de código.
+
+**Atualização automática (Windows — Agendador de Tarefas):** faça a máquina rodar o
+`update.ps1` periodicamente, para que os ajustes subam sem você fazer nada.
+
+1. Abra o **Agendador de Tarefas** (Task Scheduler) → *Criar Tarefa…* (não "tarefa básica").
+2. **Geral:** nome `Ultron Update`; marque *Executar somente quando o usuário estiver
+   conectado* (o Docker Desktop roda na sua sessão).
+3. **Disparadores → Novo:** *Ao fazer logon* e marque *Repetir a cada 10 minutos* por
+   *Indefinidamente*.
+4. **Ações → Novo:** *Iniciar um programa*
+   - Programa: `powershell.exe`
+   - Argumentos: `-ExecutionPolicy Bypass -NoProfile -File "C:\caminho\para\ultron\scripts\update.ps1"`
+     (troque pelo caminho real da pasta do projeto)
+5. **Condições:** desmarque *Iniciar a tarefa somente se o computador estiver...* se quiser
+   que rode em bateria também. Salve.
+
+Pronto: a cada 10 minutos a máquina verifica o GitHub e, se houver algo novo, reconstrói o
+container automaticamente. (No Linux/macOS, o equivalente é um `cron` chamando
+`scripts/update.sh`.)
+
+> Requisito: a máquina precisa conseguir dar `git pull` do repositório (repositório público,
+> ou credenciais/PAT do GitHub configuradas no `git` da máquina).
+
 ## Exemplos de conversa
 
 - "adiciona tarefa: montar as caixas da mudança, prioridade alta, categoria mudança"
