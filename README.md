@@ -77,6 +77,40 @@ O bot fica em *long-polling* (não precisa de URL pública). Abra a conversa com
 no Telegram e mande `/start`. **O processo precisa ficar rodando** para os lembretes e o
 resumo diário funcionarem — na sua máquina, numa VPS, ou como serviço (systemd, Docker etc.).
 
+## Rodar 24/7 com Docker (recomendado no Windows)
+
+Para o Ultron ficar sempre no ar (os lembretes e o resumo diário dependem disso), o mais
+prático é rodar em container, que **reinicia sozinho** se cair ou se a máquina reiniciar.
+
+**Pré-requisito:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+instalado. No Windows, use o backend WSL2 e, em *Settings → General*, marque
+**"Start Docker Desktop when you log in"** para o container voltar após um reboot.
+
+```bash
+# 1. configure as credenciais (uma vez)
+copy .env.example .env        # no PowerShell/CMD; use "cp" no Git Bash/WSL
+# edite o .env: ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN, OWNER_TELEGRAM_ID
+
+# 2. suba em segundo plano (constrói a imagem na primeira vez)
+docker compose up -d --build
+
+# 3. acompanhe os logs
+docker compose logs -f ultron
+```
+
+Comandos úteis:
+
+| Ação | Comando |
+|---|---|
+| Ver logs | `docker compose logs -f ultron` |
+| Parar | `docker compose down` |
+| Reiniciar | `docker compose restart ultron` |
+| Atualizar após mudanças | `git pull` e depois `docker compose up -d --build` |
+
+O banco fica persistido em `./data/ultron.db` (volume), então suas tarefas e lembretes
+sobrevivem a reinícios e rebuilds. Não é preciso abrir nenhuma porta — o bot usa
+long-polling.
+
 ## Exemplos de conversa
 
 - "adiciona tarefa: montar as caixas da mudança, prioridade alta, categoria mudança"

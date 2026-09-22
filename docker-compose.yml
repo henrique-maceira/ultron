@@ -1,0 +1,15 @@
+services:
+  ultron:
+    build: .
+    container_name: ultron
+    # Lê ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN, OWNER_TELEGRAM_ID etc. do arquivo .env.
+    env_file:
+      - .env
+    environment:
+      # Mantém o banco no volume persistente (sobrescreve o padrão do .env).
+      DB_PATH: /app/data/ultron.db
+    volumes:
+      # Persiste o SQLite entre reinícios/rebuilds do container.
+      - ./data:/app/data
+    # Religa sozinho se o processo cair ou quando o Docker/máquina reiniciar.
+    restart: unless-stopped
