@@ -1,0 +1,19 @@
+# Segredos e ambiente
+.env
+
+# Banco de dados local
+*.db
+*.db-journal
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
