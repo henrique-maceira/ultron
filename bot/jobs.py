@@ -19,10 +19,18 @@ REMINDER_CHECK_INTERVAL = 60  # segundos
 LOCAL_FMT = "%Y-%m-%dT%H:%M:%S"
 
 BRIEFING_PROMPT = (
-    "Gere agora o meu resumo diário de prioridades. Use a ferramenta get_agenda para "
-    "consultar minhas tarefas pendentes e lembretes, e me diga de forma curta e motivadora: "
-    "o que é mais importante hoje, em que ordem atacar e um próximo passo concreto. "
-    "Se houver compromissos hoje, destaque os horários."
+    "Gere agora o meu resumo diário ESTRATÉGICO. Chame get_agenda para ver minhas metas ativas "
+    "(com progresso e próxima etapa), etapas com prazo próximo, tarefas, lembretes e compromissos. "
+    "Depois me diga, de forma curta e motivadora: (1) em qual meta focar hoje e por quê, "
+    "(2) as 1–3 etapas/tarefas mais importantes do dia, em ordem, (3) o que está atrasado ou em risco, "
+    "(4) os horários da agenda de hoje, e (5) um único próximo passo concreto para começar agora."
+)
+
+WEEKLY_REVIEW_PROMPT = (
+    "É a revisão semanal. Chame get_agenda e, para cada meta ativa, avalie o progresso da semana: "
+    "o que avançou, o que ficou parado e se o cronograma ainda é realista frente ao prazo. "
+    "Se algo atrasou, proponha replanejar (ajustar prazos de etapas ou adicionar etapas). "
+    "Feche com o foco e os marcos da próxima semana, em poucas linhas."
 )
 
 
@@ -78,6 +86,18 @@ def register_jobs(application: Application, config: Config, brain: Brain) -> Non
             parse_mode="Markdown",
         )
 
+    async def weekly_review(context: ContextTypes.DEFAULT_TYPE) -> None:
+        try:
+            summary = await brain.chat(config.owner_telegram_id, WEEKLY_REVIEW_PROMPT, persist=False)
+        except Exception:  # noqa: BLE001
+            logger.exception("Falha ao gerar a revisão semanal")
+            return
+        await context.bot.send_message(
+            chat_id=config.owner_telegram_id,
+            text=f"🧭 *Revisão semanal — metas e cronograma:*\n\n{summary}",
+            parse_mode="Markdown",
+        )
+
     job_queue = application.job_queue
     job_queue.run_repeating(check_reminders, interval=REMINDER_CHECK_INTERVAL, first=10, name="reminders")
 
@@ -87,5 +107,15 @@ def register_jobs(application: Application, config: Config, brain: Brain) -> Non
         time=dt.time(hour=hour, minute=minute, tzinfo=config.tz),
         name="daily_briefing",
     )
-    logger.info("Jobs registrados: lembretes (a cada %ss) e briefing diário às %02d:%02d",
-                REMINDER_CHECK_INTERVAL, hour, minute)
+    # Revisão estratégica semanal: domingo à noite. No PTB v20+, days 0-6 = domingo-sábado,
+    # então domingo = 0.
+    job_queue.run_daily(
+        weekly_review,
+        time=dt.time(hour=19, minute=0, tzinfo=config.tz),
+        days=(0,),
+        name="weekly_review",
+    )
+    logger.info(
+        "Jobs registrados: lembretes (a cada %ss), briefing diário às %02d:%02d e revisão semanal (dom 19:00)",
+        REMINDER_CHECK_INTERVAL, hour, minute,
+    )

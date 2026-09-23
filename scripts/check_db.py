@@ -49,6 +49,31 @@ def main() -> None:
     assert db.due_reminders("2025-01-01T00:00:00") == []
     assert db.list_reminders(USER) == []  # não inclui enviados
 
+    # --- Metas e etapas ---
+    g = db.create_goal(USER, "Tirar certificação AWS", category="estudos", target_date="2026-12-01T00:00:00")
+    assert g["id"] and g["status"] == "ativo", g
+    s1 = db.create_step(USER, g["id"], "Escolher a certificação e a data", due_date="2026-10-01T00:00:00", is_milestone=True)
+    s2 = db.create_step(USER, g["id"], "Fazer 10 simulados", due_date="2026-11-20T00:00:00")
+    assert s1["order_index"] < s2["order_index"], (s1, s2)
+
+    metas = db.list_goals(USER)
+    assert len(metas) == 1 and metas[0]["etapas_total"] == 2 and metas[0]["etapas_feitas"] == 0
+    assert metas[0]["proxima_etapa"]["id"] == s1["id"], metas[0]["proxima_etapa"]
+
+    db.complete_step(USER, s1["id"])
+    plano = db.get_goal_plan(USER, g["id"])
+    assert plano["progresso_pct"] == 50 and plano["etapas_feitas"] == 1, plano
+    assert db.list_goals(USER)[0]["proxima_etapa"]["id"] == s2["id"]
+
+    prox = db.upcoming_steps(USER, "2026-10-15T00:00:00")
+    assert prox == [], prox  # s1 concluída; s2 vence em 20/11 (fora da janela)
+    prox2 = db.upcoming_steps(USER, "2026-12-31T00:00:00")
+    assert any(x["id"] == s2["id"] and x["goal_title"] == g["title"] for x in prox2), prox2
+
+    db.update_goal(USER, g["id"], status="concluido")
+    assert db.list_goals(USER) == []  # só ativas por padrão
+    assert len(db.list_goals(USER, status=None)) == 1  # todas
+
     # --- Histórico ---
     db.add_message(USER, "user", "oi")
     db.add_message(USER, "assistant", "olá!")

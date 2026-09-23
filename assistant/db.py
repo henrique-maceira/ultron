@@ -65,6 +65,33 @@ def init_db() -> None:
                 created_at TEXT    NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS goals (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL,
+                title       TEXT    NOT NULL,
+                description TEXT,
+                category    TEXT,
+                target_date TEXT,
+                status      TEXT    NOT NULL DEFAULT 'ativo',
+                created_at  TEXT    NOT NULL,
+                updated_at  TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS steps (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                goal_id      INTEGER NOT NULL,
+                user_id      INTEGER NOT NULL,
+                title        TEXT    NOT NULL,
+                notes        TEXT,
+                due_date     TEXT,
+                is_milestone INTEGER NOT NULL DEFAULT 0,
+                order_index  INTEGER NOT NULL DEFAULT 0,
+                status       TEXT    NOT NULL DEFAULT 'pendente',
+                created_at   TEXT    NOT NULL,
+                updated_at   TEXT    NOT NULL,
+                FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS messages (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL,
@@ -217,6 +244,196 @@ def reschedule_reminder(reminder_id: int, next_remind_at: str) -> None:
             "UPDATE reminders SET remind_at = ?, sent = 0 WHERE id = ?",
             (next_remind_at, reminder_id),
         )
+
+
+# --------------------------------------------------------------------------- #
+# Metas (goals) e etapas (steps)
+# --------------------------------------------------------------------------- #
+def create_goal(
+    user_id: int,
+    title: str,
+    description: Optional[str] = None,
+    category: Optional[str] = None,
+    target_date: Optional[str] = None,
+) -> dict[str, Any]:
+    now = _utc_now()
+    with _conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO goals (user_id, title, description, category, target_date,
+                                  status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'ativo', ?, ?)""",
+            (user_id, title, description, category, target_date, now, now),
+        )
+        row = conn.execute("SELECT * FROM goals WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return dict(row)
+
+
+def get_goal(user_id: int, goal_id: int) -> Optional[dict[str, Any]]:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM goals WHERE id = ? AND user_id = ?", (goal_id, user_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def _goal_progress(conn: sqlite3.Connection, goal_id: int) -> dict[str, int]:
+    row = conn.execute(
+        """SELECT COUNT(*) AS total,
+                  SUM(CASE WHEN status = 'concluida' THEN 1 ELSE 0 END) AS feitas
+           FROM steps WHERE goal_id = ?""",
+        (goal_id,),
+    ).fetchone()
+    total = row["total"] or 0
+    feitas = row["feitas"] or 0
+    pct = round(100 * feitas / total) if total else 0
+    return {"etapas_total": total, "etapas_feitas": feitas, "progresso_pct": pct}
+
+
+def list_goals(user_id: int, status: Optional[str] = "ativo") -> list[dict[str, Any]]:
+    """Lista metas (por padrão só as ativas), cada uma com progresso e próxima etapa."""
+    query = "SELECT * FROM goals WHERE user_id = ?"
+    params: list[Any] = [user_id]
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    query += " ORDER BY (target_date IS NULL), target_date, id"
+    with _conn() as conn:
+        goals = [dict(r) for r in conn.execute(query, params).fetchall()]
+        for g in goals:
+            g.update(_goal_progress(conn, g["id"]))
+            nxt = conn.execute(
+                """SELECT id, title, due_date, is_milestone FROM steps
+                   WHERE goal_id = ? AND status = 'pendente'
+                   ORDER BY (due_date IS NULL), due_date, order_index, id LIMIT 1""",
+                (g["id"],),
+            ).fetchone()
+            g["proxima_etapa"] = dict(nxt) if nxt else None
+        return goals
+
+
+def update_goal(user_id: int, goal_id: int, **fields: Any) -> Optional[dict[str, Any]]:
+    allowed = {"title", "description", "category", "target_date", "status"}
+    updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+    if not updates:
+        return get_goal(user_id, goal_id)
+    updates["updated_at"] = _utc_now()
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    params = list(updates.values()) + [goal_id, user_id]
+    with _conn() as conn:
+        conn.execute(f"UPDATE goals SET {set_clause} WHERE id = ? AND user_id = ?", params)
+    return get_goal(user_id, goal_id)
+
+
+def delete_goal(user_id: int, goal_id: int) -> bool:
+    with _conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM goals WHERE id = ? AND user_id = ?", (goal_id, user_id)
+        )
+        return cur.rowcount > 0
+
+
+def create_step(
+    user_id: int,
+    goal_id: int,
+    title: str,
+    notes: Optional[str] = None,
+    due_date: Optional[str] = None,
+    is_milestone: bool = False,
+    order_index: Optional[int] = None,
+) -> dict[str, Any]:
+    now = _utc_now()
+    with _conn() as conn:
+        # Valida que a meta pertence ao usuário.
+        owner = conn.execute(
+            "SELECT 1 FROM goals WHERE id = ? AND user_id = ?", (goal_id, user_id)
+        ).fetchone()
+        if not owner:
+            raise ValueError(f"Meta {goal_id} não encontrada para o usuário.")
+        if order_index is None:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(order_index), 0) + 1 AS nxt FROM steps WHERE goal_id = ?",
+                (goal_id,),
+            ).fetchone()
+            order_index = row["nxt"]
+        cur = conn.execute(
+            """INSERT INTO steps (goal_id, user_id, title, notes, due_date, is_milestone,
+                                  order_index, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?)""",
+            (goal_id, user_id, title, notes, due_date, int(bool(is_milestone)), order_index, now, now),
+        )
+        row = conn.execute("SELECT * FROM steps WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return dict(row)
+
+
+def list_steps(
+    user_id: int,
+    goal_id: Optional[int] = None,
+    status: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    query = "SELECT * FROM steps WHERE user_id = ?"
+    params: list[Any] = [user_id]
+    if goal_id is not None:
+        query += " AND goal_id = ?"
+        params.append(goal_id)
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    query += " ORDER BY (due_date IS NULL), due_date, order_index, id"
+    with _conn() as conn:
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def get_step(user_id: int, step_id: int) -> Optional[dict[str, Any]]:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM steps WHERE id = ? AND user_id = ?", (step_id, user_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def update_step(user_id: int, step_id: int, **fields: Any) -> Optional[dict[str, Any]]:
+    allowed = {"title", "notes", "due_date", "is_milestone", "order_index", "status"}
+    updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+    if "is_milestone" in updates:
+        updates["is_milestone"] = int(bool(updates["is_milestone"]))
+    if not updates:
+        return get_step(user_id, step_id)
+    updates["updated_at"] = _utc_now()
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    params = list(updates.values()) + [step_id, user_id]
+    with _conn() as conn:
+        conn.execute(f"UPDATE steps SET {set_clause} WHERE id = ? AND user_id = ?", params)
+    return get_step(user_id, step_id)
+
+
+def complete_step(user_id: int, step_id: int) -> Optional[dict[str, Any]]:
+    return update_step(user_id, step_id, status="concluida")
+
+
+def get_goal_plan(user_id: int, goal_id: int) -> Optional[dict[str, Any]]:
+    """Meta + suas etapas + progresso, para revisar/atualizar o cronograma."""
+    goal = get_goal(user_id, goal_id)
+    if not goal:
+        return None
+    with _conn() as conn:
+        goal.update(_goal_progress(conn, goal_id))
+    goal["etapas"] = list_steps(user_id, goal_id=goal_id)
+    return goal
+
+
+def upcoming_steps(user_id: int, until_iso: str) -> list[dict[str, Any]]:
+    """Etapas pendentes com prazo até `until_iso` (ISO local), para briefings."""
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT s.*, g.title AS goal_title FROM steps s
+               JOIN goals g ON g.id = s.goal_id
+               WHERE s.user_id = ? AND s.status = 'pendente'
+                     AND s.due_date IS NOT NULL AND s.due_date <= ?
+                     AND g.status = 'ativo'
+               ORDER BY s.due_date, s.order_index""",
+            (user_id, until_iso),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 # --------------------------------------------------------------------------- #

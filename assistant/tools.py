@@ -126,12 +126,130 @@ TOOL_DEFS: list[dict[str, Any]] = [
             "required": ["id"],
         },
     },
+    # ----------------------------- Metas e etapas --------------------------- #
+    {
+        "name": "create_goal",
+        "description": (
+            "Cria uma META/objetivo maior do usuário (ex.: 'tirar certificação AWS', 'organizar a "
+            "mudança'). Use quando ele definir um objetivo de médio/longo prazo. Depois de criar, "
+            "decomponha em etapas com add_step, trabalhando de trás pra frente a partir do prazo."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Nome curto e claro da meta."},
+                "description": {"type": "string", "description": "Contexto, critério de sucesso, o que 'pronto' significa."},
+                "category": {"type": "string", "description": "Área: trabalho, financas, estudos, casa, mudanca, projeto, pessoal."},
+                "target_date": {"type": "string", "description": "Prazo-alvo em ISO 8601 local, se houver."},
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "list_goals",
+        "description": (
+            "Lista as metas do usuário com progresso (% e etapas feitas/total) e a próxima etapa de "
+            "cada uma. Use para ter a visão estratégica antes de planejar ou priorizar."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["ativo", "concluido", "pausado"],
+                    "description": "Filtra por status. Padrão: só ativas. Passe null explicitamente p/ todas.",
+                },
+            },
+        },
+    },
+    {
+        "name": "update_goal",
+        "description": "Atualiza uma meta (título, descrição, categoria, prazo, status). Use para concluir/pausar/replanejar.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer", "description": "ID da meta."},
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+                "category": {"type": "string"},
+                "target_date": {"type": "string", "description": "Novo prazo em ISO 8601 local."},
+                "status": {"type": "string", "enum": ["ativo", "concluido", "pausado"]},
+            },
+            "required": ["id"],
+        },
+    },
+    {
+        "name": "add_step",
+        "description": (
+            "Adiciona uma ETAPA a uma meta (um passo do cronograma). Defina prazos concretos e marque "
+            "como marco (is_milestone) os pontos de verificação importantes. Distribua as etapas ao "
+            "longo do tempo até o prazo da meta."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "integer", "description": "ID da meta a que a etapa pertence."},
+                "title": {"type": "string", "description": "O que fazer nesta etapa."},
+                "notes": {"type": "string", "description": "Detalhes/como fazer."},
+                "due_date": {"type": "string", "description": "Prazo da etapa em ISO 8601 local."},
+                "is_milestone": {"type": "boolean", "description": "True se for um marco/checkpoint."},
+                "order_index": {"type": "integer", "description": "Ordem manual (opcional; senão vai pro fim)."},
+            },
+            "required": ["goal_id", "title"],
+        },
+    },
+    {
+        "name": "list_steps",
+        "description": "Lista etapas, opcionalmente de uma meta específica e/ou por status.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "integer", "description": "Filtra por meta. Omitir para todas."},
+                "status": {"type": "string", "enum": ["pendente", "concluida"]},
+            },
+        },
+    },
+    {
+        "name": "update_step",
+        "description": "Atualiza uma etapa (título, notas, prazo, marco, ordem, status). Use para remarcar ou reordenar.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer", "description": "ID da etapa."},
+                "title": {"type": "string"},
+                "notes": {"type": "string"},
+                "due_date": {"type": "string", "description": "Novo prazo em ISO 8601 local."},
+                "is_milestone": {"type": "boolean"},
+                "order_index": {"type": "integer"},
+                "status": {"type": "string", "enum": ["pendente", "concluida"]},
+            },
+            "required": ["id"],
+        },
+    },
+    {
+        "name": "complete_step",
+        "description": "Marca uma etapa como concluída (avança o progresso da meta).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"id": {"type": "integer", "description": "ID da etapa concluída."}},
+            "required": ["id"],
+        },
+    },
+    {
+        "name": "get_goal_plan",
+        "description": "Retorna uma meta com TODAS as suas etapas e o progresso. Use para revisar/ajustar o cronograma de uma meta.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"goal_id": {"type": "integer", "description": "ID da meta."}},
+            "required": ["goal_id"],
+        },
+    },
     {
         "name": "get_agenda",
         "description": (
-            "Retorna um panorama consolidado (tarefas pendentes + lembretes futuros + compromissos "
-            "da agenda quando disponível) para ajudar a priorizar. Use antes de responder perguntas "
-            "do tipo 'o que devo fazer hoje?'."
+            "Retorna um panorama estratégico consolidado: metas ativas (com progresso e próxima etapa), "
+            "etapas com prazo próximo, tarefas pendentes, lembretes futuros e compromissos da agenda "
+            "quando disponível. Use antes de responder 'o que faço hoje?' ou ao montar o resumo."
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
@@ -256,8 +374,65 @@ def _dispatch(user_id: int, name: str, args: dict[str, Any]) -> Any:
         return db.list_reminders(user_id)
     if name == "delete_reminder":
         return {"deleted": db.delete_reminder(user_id, args["id"])}
+    # --- Metas e etapas ---
+    if name == "create_goal":
+        return db.create_goal(
+            user_id,
+            title=args["title"],
+            description=args.get("description"),
+            category=args.get("category"),
+            target_date=args.get("target_date"),
+        )
+    if name == "list_goals":
+        # Se a chave 'status' vier explicitamente como null, lista todas.
+        status = args.get("status", "ativo") if "status" in args else "ativo"
+        return db.list_goals(user_id, status=status)
+    if name == "update_goal":
+        return db.update_goal(
+            user_id,
+            args["id"],
+            title=args.get("title"),
+            description=args.get("description"),
+            category=args.get("category"),
+            target_date=args.get("target_date"),
+            status=args.get("status"),
+        )
+    if name == "add_step":
+        return db.create_step(
+            user_id,
+            goal_id=args["goal_id"],
+            title=args["title"],
+            notes=args.get("notes"),
+            due_date=args.get("due_date"),
+            is_milestone=bool(args.get("is_milestone", False)),
+            order_index=args.get("order_index"),
+        )
+    if name == "list_steps":
+        return db.list_steps(user_id, goal_id=args.get("goal_id"), status=args.get("status"))
+    if name == "update_step":
+        return db.update_step(
+            user_id,
+            args["id"],
+            title=args.get("title"),
+            notes=args.get("notes"),
+            due_date=args.get("due_date"),
+            is_milestone=args.get("is_milestone"),
+            order_index=args.get("order_index"),
+            status=args.get("status"),
+        )
+    if name == "complete_step":
+        return db.complete_step(user_id, args["id"])
+    if name == "get_goal_plan":
+        return db.get_goal_plan(user_id, args["goal_id"])
+
     if name == "get_agenda":
+        from datetime import datetime, timedelta
+
         agenda: dict[str, Any] = {
+            "metas_ativas": db.list_goals(user_id, status="ativo"),
+            "etapas_proximos_7_dias": db.upcoming_steps(
+                user_id, (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+            ),
             "tarefas_pendentes": db.list_tasks(user_id, status="pendente"),
             "lembretes_futuros": db.list_reminders(user_id),
         }
