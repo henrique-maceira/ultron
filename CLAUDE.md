@@ -151,6 +151,8 @@ Dockerfile, docker-compose.yml, .dockerignore, data/.gitkeep   # deploy 24/7
       **Fase 3 feita** = dependências entre etapas (`steps.depends_on`, migração via
       `_ensure_column`; `get_goal_plan` marca `bloqueada`); horários livres
       (`gcal.find_free_slots` + tool `find_free_slots`, ignora eventos de dia inteiro);
-      finanças (`expenses`/`budgets`, tools `log_expense`/`get_expense_summary`/`set_budget`/
-      `list_budgets`; `budget_status` compara gasto vs. teto no mês).
+      finanças (`expenses`/`budgets`, tools `log_expense`/`get_expense_summary`/`list_expenses`/
+      `delete_expense`/`set_budget`/`list_budgets`; `budget_status` compara gasto vs. teto no mês).
+      Comprovantes/boletos (imagem/PDF) são lidos e lançados via `log_expense` (persona).
+      Job `weekly_finance_report` (dom 20:00) manda o relatório financeiro semanal.
 - (d) **CI** (GitHub Actions) validando `build` do Docker + `check_db.py` + lint.

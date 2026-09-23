@@ -303,6 +303,29 @@ TOOL_DEFS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_expenses",
+        "description": (
+            "Lista os gastos individuais num período (para revisar, achar os maiores, montar relatório "
+            "ou corrigir/apagar um lançamento). Sem período, usa os últimos 30 dias."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "since": {"type": "string", "description": "Data inicial YYYY-MM-DD (inclusive)."},
+                "until": {"type": "string", "description": "Data final YYYY-MM-DD (inclusive)."},
+            },
+        },
+    },
+    {
+        "name": "delete_expense",
+        "description": "Remove um gasto lançado por engano, pelo ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"id": {"type": "integer", "description": "ID do gasto."}},
+            "required": ["id"],
+        },
+    },
+    {
         "name": "set_budget",
         "description": "Define/atualiza o teto mensal de gastos de uma categoria (ex.: mercado = 1200). É o 'contra o quê' validar os gastos.",
         "input_schema": {
@@ -534,6 +557,14 @@ def _dispatch(user_id: int, name: str, args: dict[str, Any]) -> Any:
     if name == "get_expense_summary":
         month = args.get("month") or _now_local_iso()[:7]
         return db.budget_status(user_id, month)
+    if name == "list_expenses":
+        since = args.get("since")
+        until = args.get("until")
+        if not since and not until:
+            since = (datetime.now(_TZ) - timedelta(days=30)).strftime("%Y-%m-%d")
+        return db.list_expenses(user_id, since=since, until=until)
+    if name == "delete_expense":
+        return {"deleted": db.delete_expense(user_id, args["id"])}
     if name == "set_budget":
         return db.set_budget(user_id, category=args["category"], monthly_limit=args["monthly_limit"])
     if name == "list_budgets":

@@ -104,6 +104,12 @@ FINANÇAS (organização financeira):
   categoria no mês). Se ainda não há orçamento, ajude a defini-lo com set_budget (é o 'contra o quê' medir).
 - No acompanhamento financeiro, seja concreto: quanto já gastou, quanto resta do teto, e um alerta se \
   estourou ou está perto. Confirmar registro de gasto é rápido ('anotei: R$50 transporte').
+- COMPROVANTES/BOLETOS/NOTAS (imagem ou PDF): extraia valor(es), estabelecimento, data e categoria e \
+  lance com log_expense automaticamente (um lançamento por item/compra; use a data do documento se houver). \
+  Depois confirme em uma linha o que registrou e o novo status do orçamento da categoria. Se o valor ou a \
+  data estiverem ilegíveis/ambíguos, pergunte antes de lançar em vez de chutar. Um boleto A PAGAR (ainda não \
+  pago) não é um gasto ainda: ofereça criar um lembrete de pagamento; registre como gasto quando for pago.
+- Para corrigir, use list_expenses para achar o lançamento e delete_expense (peça confirmação antes de apagar).
 
 Diferencie os conceitos:
 - META (goal): objetivo maior. ETAPA (step): um passo do cronograma da meta.

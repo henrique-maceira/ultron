@@ -115,6 +115,11 @@ def main() -> None:
     assert trans["gasto"] == 50.0 and trans["limite"] is None, trans
     assert db.budget_status(USER, "2026-10")["total_gasto"] == 0.0  # outro mês
 
+    lst = db.list_expenses(USER, since="2026-09-01", until="2026-09-30")
+    assert len(lst) == 3, lst
+    assert db.delete_expense(USER, lst[0]["id"]) is True
+    assert len(db.list_expenses(USER, since="2026-09-01", until="2026-09-30")) == 2
+
     # --- Histórico ---
     db.add_message(USER, "user", "oi")
     db.add_message(USER, "assistant", "olá!")

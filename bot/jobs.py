@@ -36,6 +36,15 @@ WEEKLY_REVIEW_PROMPT = (
     "marcos da próxima semana, em poucas linhas."
 )
 
+FINANCE_REPORT_PROMPT = (
+    "Gere meu RELATÓRIO FINANCEIRO da semana. Use get_expense_summary (mês atual) e list_expenses "
+    "(últimos 7 dias) e me diga, curto e direto: (1) quanto gastei na semana e no mês; (2) por categoria, "
+    "gasto vs. orçamento (destaque o que estourou ou está perto do teto); (3) os maiores gastos da semana; "
+    "(4) se estou no caminho para fechar o mês dentro do orçamento (projeção simples); (5) uma dica prática "
+    "de ajuste. Se eu ainda não tiver orçamento definido, sugira tetos por categoria com base nos gastos "
+    "e ofereça criá-los (com set_budget) após eu confirmar."
+)
+
 
 def _now_local_str(config: Config) -> str:
     return dt.datetime.now(config.tz).strftime(LOCAL_FMT)
@@ -101,6 +110,18 @@ def register_jobs(application: Application, config: Config, brain: Brain) -> Non
             parse_mode="Markdown",
         )
 
+    async def weekly_finance_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+        try:
+            report = await brain.chat(config.owner_telegram_id, FINANCE_REPORT_PROMPT, persist=False)
+        except Exception:  # noqa: BLE001
+            logger.exception("Falha ao gerar o relatório financeiro")
+            return
+        await context.bot.send_message(
+            chat_id=config.owner_telegram_id,
+            text=f"💰 *Relatório financeiro da semana:*\n\n{report}",
+            parse_mode="Markdown",
+        )
+
     job_queue = application.job_queue
     job_queue.run_repeating(check_reminders, interval=REMINDER_CHECK_INTERVAL, first=10, name="reminders")
 
@@ -118,7 +139,15 @@ def register_jobs(application: Application, config: Config, brain: Brain) -> Non
         days=(0,),
         name="weekly_review",
     )
+    # Relatório financeiro semanal: domingo 20:00 (logo após a revisão estratégica).
+    job_queue.run_daily(
+        weekly_finance_report,
+        time=dt.time(hour=20, minute=0, tzinfo=config.tz),
+        days=(0,),
+        name="weekly_finance_report",
+    )
     logger.info(
-        "Jobs registrados: lembretes (a cada %ss), briefing diário às %02d:%02d e revisão semanal (dom 19:00)",
+        "Jobs registrados: lembretes (%ss), briefing diário %02d:%02d, revisão semanal (dom 19:00) "
+        "e relatório financeiro (dom 20:00)",
         REMINDER_CHECK_INTERVAL, hour, minute,
     )
