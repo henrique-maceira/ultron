@@ -139,9 +139,12 @@ Dockerfile, docker-compose.yml, .dockerignore, data/.gitkeep   # deploy 24/7
 - (a) Suporte a **Discord** (nova subclasse não é preciso; reusar `Brain`, novo adaptador de bot).
 - (b) **Testes automatizados** de `tools.py` e do loop de `brain.py` (com API mockada).
 - (c) ~~Integração com **Google Calendar**~~ — **feito** (`gcal.py` + ferramentas de agenda).
-- (e) ~~**Agente estratégico** (metas/etapas/cronograma)~~ — **Fase 1 feita**. Próximas fases:
-      Fase 2 = acompanhamento de progresso mais rico + replanejamento automático quando atrasa;
-      Fase 3 = dependências entre etapas, sugestão de horários livres (free/busy) e
+- (e) ~~**Agente estratégico** (metas/etapas/cronograma)~~ — **Fases 1 e 2 feitas**.
+      Fase 2 = `db.goals_health()` (atrasadas/paradas/dias até prazo) + tool `get_goal_health`;
+      briefing/revisão semanal acionam replanejamento; **regra: nunca altera meta/etapa/evento
+      sem confirmação do dono** (só criar item novo pedido explicitamente dispensa confirmação).
+      `tools.configure(tz)` dá o fuso aos handlers (datas de negócio são locais).
+      Fase 3 (pendente) = dependências entre etapas, horários livres (free/busy) e
       **registro de gastos** (tabela de despesas + orçamento) para a meta financeira validar
       de verdade (hoje o dono envia gastos como mensagem; ainda não há persistência estruturada).
 - (d) **CI** (GitHub Actions) validando `build` do Docker + `check_db.py` + lint.

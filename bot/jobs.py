@@ -19,18 +19,20 @@ REMINDER_CHECK_INTERVAL = 60  # segundos
 LOCAL_FMT = "%Y-%m-%dT%H:%M:%S"
 
 BRIEFING_PROMPT = (
-    "Gere agora o meu resumo diário ESTRATÉGICO. Chame get_agenda para ver minhas metas ativas "
-    "(com progresso e próxima etapa), etapas com prazo próximo, tarefas, lembretes e compromissos. "
-    "Depois me diga, de forma curta e motivadora: (1) em qual meta focar hoje e por quê, "
-    "(2) as 1–3 etapas/tarefas mais importantes do dia, em ordem, (3) o que está atrasado ou em risco, "
-    "(4) os horários da agenda de hoje, e (5) um único próximo passo concreto para começar agora."
+    "Gere agora o meu resumo diário ESTRATÉGICO. Chame get_agenda e get_goal_health para ver minhas "
+    "metas (progresso, próxima etapa), o que está ATRASADO/PARADO/em risco, etapas com prazo próximo, "
+    "tarefas, lembretes e compromissos. Depois me diga, de forma curta e motivadora: (1) em qual meta "
+    "focar hoje e por quê, (2) as 1–3 etapas/tarefas mais importantes do dia, em ordem, (3) o que está "
+    "atrasado ou em risco — e, se for o caso, PROPONHA um replanejamento (sem alterar nada ainda; peça "
+    "meu ok), (4) os horários da agenda de hoje, e (5) um único próximo passo para começar agora."
 )
 
 WEEKLY_REVIEW_PROMPT = (
-    "É a revisão semanal. Chame get_agenda e, para cada meta ativa, avalie o progresso da semana: "
-    "o que avançou, o que ficou parado e se o cronograma ainda é realista frente ao prazo. "
-    "Se algo atrasou, proponha replanejar (ajustar prazos de etapas ou adicionar etapas). "
-    "Feche com o foco e os marcos da próxima semana, em poucas linhas."
+    "É a revisão semanal. Chame get_agenda e get_goal_health e, para cada meta ativa, avalie o progresso "
+    "da semana: o que avançou, o que ficou parado e se o cronograma ainda é realista frente ao prazo. "
+    "Se algo atrasou ou está em risco, PROPONHA replanejar com opções concretas (empurrar e comprimir "
+    "etapas, ou mover o prazo da meta) — mas NÃO altere nada sem eu confirmar. Feche com o foco e os "
+    "marcos da próxima semana, em poucas linhas."
 )
 
 

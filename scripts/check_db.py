@@ -70,9 +70,23 @@ def main() -> None:
     prox2 = db.upcoming_steps(USER, "2026-12-31T00:00:00")
     assert any(x["id"] == s2["id"] and x["goal_title"] == g["title"] for x in prox2), prox2
 
+    # --- Saúde das metas (Fase 2): etapa atrasada + meta parada ---
+    # Cenário: s1 concluída; s2 pendente (venceu 20/11); prazo da meta 01/12.
+    saude = db.goals_health(
+        USER,
+        now_local_iso="2026-11-25T12:00:00",       # depois do prazo de s2 (20/11)
+        now_utc_iso="2026-11-25T15:00:00+00:00",   # bem depois do último progresso real
+        stalled_days=5,
+    )
+    h = next(x for x in saude if x["id"] == g["id"])
+    assert h["dias_ate_prazo"] == 6, h["dias_ate_prazo"]  # 01/12 - 25/11
+    assert [a["id"] for a in h["etapas_atrasadas"]] == [s2["id"]], h["etapas_atrasadas"]
+    assert h["parada"] is True, h  # sem progresso recente, ainda há etapa pendente
+
     db.update_goal(USER, g["id"], status="concluido")
     assert db.list_goals(USER) == []  # só ativas por padrão
     assert len(db.list_goals(USER, status=None)) == 1  # todas
+    assert db.goals_health(USER, "2026-11-25T12:00:00", "2026-11-25T15:00:00+00:00") == []
 
     # --- Histórico ---
     db.add_message(USER, "user", "oi")

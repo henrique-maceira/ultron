@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 
-from assistant import db
+from assistant import db, tools
 from assistant.brain import get_brain
 from bot.jobs import register_jobs
 from bot.telegram_bot import build_application
@@ -23,6 +23,7 @@ def main() -> None:
 
     config = load_config()
     db.configure(config.db_path)
+    tools.configure(config.tz)
 
     if config.google_calendar_enabled:
         from assistant import gcal

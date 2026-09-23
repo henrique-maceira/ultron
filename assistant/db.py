@@ -436,6 +436,64 @@ def upcoming_steps(user_id: int, until_iso: str) -> list[dict[str, Any]]:
         return [dict(r) for r in rows]
 
 
+def goals_health(
+    user_id: int,
+    now_local_iso: str,
+    now_utc_iso: str,
+    stalled_days: int = 5,
+) -> list[dict[str, Any]]:
+    """Diagnóstico por meta ativa: etapas atrasadas, meta parada, dias até o prazo.
+
+    Sinais crus para o modelo interpretar e PROPOR replanejamento (nunca alterar sem
+    confirmação). `now_local_iso` é o agora no fuso local (compara com due_date/target_date,
+    que são locais); `now_utc_iso` compara com updated_at (UTC).
+    """
+    from datetime import datetime, timedelta
+
+    cutoff_utc = (datetime.fromisoformat(now_utc_iso) - timedelta(days=stalled_days)).isoformat()
+    try:
+        today = datetime.fromisoformat(now_local_iso).date()
+    except ValueError:
+        today = datetime.now().date()
+
+    out: list[dict[str, Any]] = []
+    for g in list_goals(user_id, status="ativo"):
+        steps = list_steps(user_id, goal_id=g["id"])
+        pend = [s for s in steps if s["status"] == "pendente"]
+        done = [s for s in steps if s["status"] == "concluida"]
+        atrasadas = [
+            {"id": s["id"], "title": s["title"], "due_date": s["due_date"], "is_milestone": s["is_milestone"]}
+            for s in pend
+            if s["due_date"] and s["due_date"] < now_local_iso
+        ]
+        ultimo_progresso = max((s["updated_at"] for s in done), default=g["created_at"])
+        parada = bool(pend) and ultimo_progresso < cutoff_utc
+
+        dias_ate_prazo = None
+        if g["target_date"]:
+            try:
+                dias_ate_prazo = (datetime.fromisoformat(g["target_date"]).date() - today).days
+            except ValueError:
+                dias_ate_prazo = None
+
+        out.append(
+            {
+                "id": g["id"],
+                "title": g["title"],
+                "category": g["category"],
+                "target_date": g["target_date"],
+                "dias_ate_prazo": dias_ate_prazo,
+                "progresso_pct": g["progresso_pct"],
+                "etapas_pendentes": len(pend),
+                "etapas_atrasadas": atrasadas,
+                "parada": parada,
+                "ultimo_progresso": ultimo_progresso,
+                "proxima_etapa": g["proxima_etapa"],
+            }
+        )
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Histórico de conversa
 # --------------------------------------------------------------------------- #

@@ -12,9 +12,24 @@ horário absoluto correto.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from . import db, gcal
+
+# Fuso usado para calcular "agora" nos handlers (datas de negócio são locais). É
+# configurado em main.py via configure(); o padrão evita quebrar testes offline.
+_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+def configure(tz: ZoneInfo) -> None:
+    global _TZ
+    _TZ = tz
+
+
+def _now_local_iso() -> str:
+    return datetime.now(_TZ).strftime("%Y-%m-%dT%H:%M:%S")
 
 # --------------------------------------------------------------------------- #
 # Schemas expostos ao modelo
@@ -245,6 +260,16 @@ TOOL_DEFS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_goal_health",
+        "description": (
+            "Diagnóstico das metas ativas: etapas ATRASADAS, metas PARADAS (sem progresso há dias) "
+            "e dias até o prazo. Use para acompanhar e detectar o que precisa de replanejamento. "
+            "Com base nisso, PROPONHA ajustes ao usuário e só altere (update_step/update_goal) "
+            "depois que ele confirmar."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "get_agenda",
         "description": (
             "Retorna um panorama estratégico consolidado: metas ativas (com progresso e próxima etapa), "
@@ -424,15 +449,18 @@ def _dispatch(user_id: int, name: str, args: dict[str, Any]) -> Any:
         return db.complete_step(user_id, args["id"])
     if name == "get_goal_plan":
         return db.get_goal_plan(user_id, args["goal_id"])
+    if name == "get_goal_health":
+        return db.goals_health(
+            user_id,
+            now_local_iso=_now_local_iso(),
+            now_utc_iso=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
 
     if name == "get_agenda":
-        from datetime import datetime, timedelta
-
+        until = (datetime.now(_TZ) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
         agenda: dict[str, Any] = {
             "metas_ativas": db.list_goals(user_id, status="ativo"),
-            "etapas_proximos_7_dias": db.upcoming_steps(
-                user_id, (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
-            ),
+            "etapas_proximos_7_dias": db.upcoming_steps(user_id, until),
             "tarefas_pendentes": db.list_tasks(user_id, status="pendente"),
             "lembretes_futuros": db.list_reminders(user_id),
         }
