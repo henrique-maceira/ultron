@@ -24,6 +24,23 @@ def main() -> None:
     config = load_config()
     db.configure(config.db_path)
 
+    if config.google_calendar_enabled:
+        from assistant import gcal
+
+        gcal.configure(
+            credentials_path=config.google_credentials_path,
+            token_path=config.google_token_path,
+            calendar_id=config.google_calendar_id,
+            tz=config.tz,
+        )
+        if gcal.has_token():
+            logger.info("Google Agenda habilitado (calendário=%s).", config.google_calendar_id)
+        else:
+            logger.warning(
+                "Google Agenda habilitado, mas sem token. Rode `python scripts/gcal_auth.py` "
+                "para autorizar; as ferramentas de agenda vão falhar até lá."
+            )
+
     brain = get_brain(config)
     application = build_application(config, brain)
     register_jobs(application, config, brain)

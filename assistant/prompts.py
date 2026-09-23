@@ -33,9 +33,24 @@ Regras de ferramentas:
 - Antes de responder "o que priorizar hoje?", chame get_agenda para ver tarefas e lembretes reais.
 """
 
+CALENDAR_RULES = """\
 
-def system_prompt(tz: ZoneInfo) -> str:
+Google Agenda (integração ativa):
+- Você tem acesso à agenda real do usuário. Use list_calendar_events para ver compromissos \
+  já marcados antes de propor planos ou horários — não sugira algo que conflite com o que já existe.
+- Ao montar um plano de ação com horários, ofereça criar os blocos na agenda (create_calendar_event): \
+  reuniões, consultas, blocos de foco/estudo. Confirme de forma breve ("📅 marquei X para amanhã 15h").
+- Para remarcar, use update_calendar_event; para cancelar, delete_calendar_event. Sempre pegue o \
+  event_id via list_calendar_events antes de atualizar/remover.
+- Diferencie os papéis: lembrete (create_reminder) é um aviso proativo que EU te mando; compromisso \
+  (create_calendar_event) é um bloco de tempo na sua agenda. Para consultas/reuniões com hora marcada, \
+  crie o compromisso na agenda; ofereça também um lembrete se fizer sentido avisar antes.
+"""
+
+
+def system_prompt(tz: ZoneInfo, calendar_enabled: bool = False) -> str:
     now = datetime.now(tz)
     dias = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
     agora = f"{dias[now.weekday()]}, {now.strftime('%Y-%m-%d %H:%M')} ({tz.key})"
-    return f"{PERSONA}\n\nData e hora atuais: {agora}."
+    extra = CALENDAR_RULES if calendar_enabled else ""
+    return f"{PERSONA}{extra}\n\nData e hora atuais: {agora}."

@@ -40,7 +40,10 @@ class AnthropicBrain(Brain):
     def __init__(self, config: Config):
         self._config = config
         self._client = AsyncAnthropic(api_key=config.anthropic_api_key)
-        self._tools = [*tools.TOOL_DEFS, WEB_SEARCH_TOOL]
+        self._tools = [
+            *tools.all_tool_defs(include_calendar=config.google_calendar_enabled),
+            WEB_SEARCH_TOOL,
+        ]
 
     async def chat(self, user_id: int, user_text: str, persist: bool = True) -> str:
         # Monta o histórico (texto) + a nova mensagem.
@@ -58,7 +61,7 @@ class AnthropicBrain(Brain):
         return reply_text
 
     async def _run_loop(self, user_id: int, messages: list[dict]) -> str:
-        system = system_prompt(self._config.tz)
+        system = system_prompt(self._config.tz, self._config.google_calendar_enabled)
 
         for _ in range(MAX_TOOL_ITERATIONS):
             response = await self._client.messages.create(

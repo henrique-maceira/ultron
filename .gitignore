@@ -1,6 +1,12 @@
 # Segredos e ambiente
 .env
 
+# Credenciais/token do Google Agenda (nunca versionar)
+data/google_credentials.json
+data/google_token.json
+**/google_credentials.json
+**/google_token.json
+
 # Banco de dados local
 *.db
 *.db-journal

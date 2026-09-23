@@ -20,6 +20,10 @@ class Config:
     timezone: str
     briefing_time: str  # "HH:MM"
     db_path: str
+    google_calendar_enabled: bool
+    google_credentials_path: str
+    google_token_path: str
+    google_calendar_id: str
 
     @property
     def tz(self) -> ZoneInfo:
@@ -41,6 +45,13 @@ def _require(name: str) -> str:
     return value
 
 
+def _as_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "sim", "on")
+
+
 def load_config() -> Config:
     return Config(
         anthropic_api_key=_require("ANTHROPIC_API_KEY"),
@@ -51,4 +62,8 @@ def load_config() -> Config:
         timezone=os.getenv("TIMEZONE", "America/Sao_Paulo"),
         briefing_time=os.getenv("BRIEFING_TIME", "08:00"),
         db_path=os.getenv("DB_PATH", "ultron.db"),
+        google_calendar_enabled=_as_bool("GOOGLE_CALENDAR_ENABLED", False),
+        google_credentials_path=os.getenv("GOOGLE_CREDENTIALS_PATH", "data/google_credentials.json"),
+        google_token_path=os.getenv("GOOGLE_TOKEN_PATH", "data/google_token.json"),
+        google_calendar_id=os.getenv("GOOGLE_CALENDAR_ID", "primary"),
     )

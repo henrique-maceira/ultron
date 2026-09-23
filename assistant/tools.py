@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from . import db
+from . import db, gcal
 
 # --------------------------------------------------------------------------- #
 # Schemas expostos ao modelo
@@ -129,12 +129,85 @@ TOOL_DEFS: list[dict[str, Any]] = [
     {
         "name": "get_agenda",
         "description": (
-            "Retorna um panorama consolidado (tarefas pendentes + lembretes futuros) para ajudar "
-            "a priorizar. Use antes de responder perguntas do tipo 'o que devo fazer hoje?'."
+            "Retorna um panorama consolidado (tarefas pendentes + lembretes futuros + compromissos "
+            "da agenda quando disponível) para ajudar a priorizar. Use antes de responder perguntas "
+            "do tipo 'o que devo fazer hoje?'."
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
 ]
+
+
+# Ferramentas do Google Agenda. Só são expostas ao modelo quando a integração está
+# habilitada (ver `all_tool_defs`). Datas em ISO 8601 local (YYYY-MM-DDTHH:MM:SS).
+CALENDAR_TOOL_DEFS: list[dict[str, Any]] = [
+    {
+        "name": "list_calendar_events",
+        "description": (
+            "Lista os compromissos da agenda (Google Agenda) num intervalo. Use para saber o que já "
+            "está marcado, checar disponibilidade e montar planos de ação em cima dos horários reais. "
+            "Sem intervalo, retorna de agora até 7 dias à frente."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "time_min": {"type": "string", "description": "Início do intervalo em ISO 8601 local."},
+                "time_max": {"type": "string", "description": "Fim do intervalo em ISO 8601 local."},
+            },
+        },
+    },
+    {
+        "name": "create_calendar_event",
+        "description": (
+            "Cria um compromisso na Google Agenda (reunião, consulta, bloco de foco). Use quando o "
+            "usuário quiser marcar algo com data e hora, ou ao propor um plano com horários concretos."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "Título do compromisso."},
+                "start": {"type": "string", "description": "Início em ISO 8601 local (YYYY-MM-DDTHH:MM:SS)."},
+                "end": {"type": "string", "description": "Fim em ISO 8601 local. Se omitido, dura 1 hora."},
+                "description": {"type": "string", "description": "Detalhes/anotações do evento."},
+                "location": {"type": "string", "description": "Local do compromisso."},
+                "all_day": {"type": "boolean", "description": "True para evento de dia inteiro."},
+            },
+            "required": ["summary", "start"],
+        },
+    },
+    {
+        "name": "update_calendar_event",
+        "description": "Atualiza um compromisso existente da agenda (remarcar horário, mudar título/local/detalhes).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string", "description": "ID do evento (obtido em list_calendar_events)."},
+                "summary": {"type": "string"},
+                "start": {"type": "string", "description": "Novo início em ISO 8601 local."},
+                "end": {"type": "string", "description": "Novo fim em ISO 8601 local."},
+                "description": {"type": "string"},
+                "location": {"type": "string"},
+            },
+            "required": ["event_id"],
+        },
+    },
+    {
+        "name": "delete_calendar_event",
+        "description": "Cancela/remove um compromisso da agenda pelo ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"event_id": {"type": "string", "description": "ID do evento."}},
+            "required": ["event_id"],
+        },
+    },
+]
+
+
+def all_tool_defs(include_calendar: bool) -> list[dict[str, Any]]:
+    """Conjunto de ferramentas expostas ao modelo, com ou sem as da agenda."""
+    if include_calendar:
+        return [*TOOL_DEFS, *CALENDAR_TOOL_DEFS]
+    return list(TOOL_DEFS)
 
 
 # --------------------------------------------------------------------------- #
@@ -184,8 +257,40 @@ def _dispatch(user_id: int, name: str, args: dict[str, Any]) -> Any:
     if name == "delete_reminder":
         return {"deleted": db.delete_reminder(user_id, args["id"])}
     if name == "get_agenda":
-        return {
+        agenda: dict[str, Any] = {
             "tarefas_pendentes": db.list_tasks(user_id, status="pendente"),
             "lembretes_futuros": db.list_reminders(user_id),
         }
+        # Inclui compromissos da agenda se a integração estiver disponível.
+        if gcal.has_token():
+            try:
+                agenda["compromissos_agenda"] = gcal.list_events()
+            except Exception as exc:  # não deixa a agenda derrubar o panorama
+                agenda["compromissos_agenda_erro"] = str(exc)
+        return agenda
+
+    # --- Google Agenda ---
+    if name == "list_calendar_events":
+        return gcal.list_events(time_min=args.get("time_min"), time_max=args.get("time_max"))
+    if name == "create_calendar_event":
+        return gcal.create_event(
+            summary=args["summary"],
+            start=args["start"],
+            end=args.get("end"),
+            description=args.get("description"),
+            location=args.get("location"),
+            all_day=bool(args.get("all_day", False)),
+        )
+    if name == "update_calendar_event":
+        return gcal.update_event(
+            args["event_id"],
+            summary=args.get("summary"),
+            start=args.get("start"),
+            end=args.get("end"),
+            description=args.get("description"),
+            location=args.get("location"),
+        )
+    if name == "delete_calendar_event":
+        return {"deleted": gcal.delete_event(args["event_id"])}
+
     raise ValueError(f"Ferramenta desconhecida: {name}")
