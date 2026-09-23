@@ -119,6 +119,10 @@ Dockerfile, docker-compose.yml, .dockerignore, data/.gitkeep   # deploy 24/7
 - **Lembretes:** `due_reminders()` compara strings ISO locais lexicalmente; mantenha o
   mesmo formato (`bot/jobs.py::LOCAL_FMT`).
 - **Privacidade:** o bot só responde ao `OWNER_TELEGRAM_ID`. Não relaxe isso.
+- **DB do host x container:** o compose sobrescreve `DB_PATH` para `/app/data/ultron.db`
+  (volume `./data`). Se você rodar scripts de manutenção no host, garanta que o `.env`
+  aponte para o **mesmo** arquivo (`DB_PATH=data/ultron.db`) — senão você escreve num
+  `ultron.db` na raiz que o container não lê. Já quebrou um seed de metas assim.
 - **Google Agenda:** datas de negócio continuam ISO local ingênuo; a conversão p/ RFC3339
   com fuso acontece só na borda em `gcal.py`. Não importe libs do Google no topo dos módulos
   (mantenha lazy). Credenciais/token ficam em `data/` e **não** são versionados.

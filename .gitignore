@@ -7,9 +7,12 @@ data/google_token.json
 **/google_credentials.json
 **/google_token.json
 
-# Banco de dados local
+# Banco de dados local (inclui backups .db.*-bak)
 *.db
 *.db-journal
+*.db.*
+*.seeded-bak
+*.empty-bak
 
 # Python
 __pycache__/
