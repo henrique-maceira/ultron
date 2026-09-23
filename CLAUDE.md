@@ -30,6 +30,11 @@ Idioma de todo texto voltado ao usuário e dos comentários: **português (BR)**
   provedor** (`Brain` em `assistant/brain.py`) para permitir trocar de IA por config.
 - **Busca online:** ferramenta servidora nativa do Claude `web_search_20260209` (sem API
   de busca externa).
+- **Entrada multimodal:** o bot aceita imagens, PDFs e arquivos de texto no Telegram. Os
+  handlers em `telegram_bot.py` baixam o anexo e chamam `brain.chat_multimodal` com blocos
+  `image`/`document`/`text` (Sonnet 5 já tem visão; PDF vai como bloco `document`). No
+  histórico guarda-se só um placeholder textual (reenviar mídia a cada turno seria caro),
+  então perguntas de acompanhamento sobre um anexo antigo pedem reenviá-lo.
 - **Google Agenda (opcional):** OAuth "Desktop app" com token persistido (não service
   account — precisa acessar agenda pessoal `@gmail`). Ligado por `GOOGLE_CALENDAR_ENABLED`.
   Ferramentas só entram no set quando habilitado (`tools.all_tool_defs`). Imports do Google

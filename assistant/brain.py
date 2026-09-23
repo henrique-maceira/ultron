@@ -11,6 +11,7 @@ Para trocar de provedor no futuro (Gemini, OpenAI), basta criar outra subclasse 
 from __future__ import annotations
 
 import abc
+from typing import Any
 
 from anthropic import AsyncAnthropic
 
@@ -35,6 +36,21 @@ class Brain(abc.ABC):
         """Recebe uma fala do usuário e devolve a resposta em texto do assistente."""
         raise NotImplementedError
 
+    @abc.abstractmethod
+    async def chat_multimodal(
+        self,
+        user_id: int,
+        content: list[dict[str, Any]],
+        persist_text: str,
+        persist: bool = True,
+    ) -> str:
+        """Recebe conteúdo multimodal (blocos de texto/imagem/documento) e responde.
+
+        `persist_text` é o resumo textual guardado no histórico (o histórico é só texto),
+        já que reenviar imagens/PDFs a cada turno seria caro.
+        """
+        raise NotImplementedError
+
 
 class AnthropicBrain(Brain):
     def __init__(self, config: Config):
@@ -46,17 +62,29 @@ class AnthropicBrain(Brain):
         ]
 
     async def chat(self, user_id: int, user_text: str, persist: bool = True) -> str:
-        # Monta o histórico (texto) + a nova mensagem.
+        return await self._chat(user_id, user_text, user_text, persist)
+
+    async def chat_multimodal(
+        self,
+        user_id: int,
+        content: list[dict[str, Any]],
+        persist_text: str,
+        persist: bool = True,
+    ) -> str:
+        return await self._chat(user_id, content, persist_text, persist)
+
+    async def _chat(self, user_id: int, user_content: Any, persist_text: str, persist: bool) -> str:
+        # Monta o histórico (texto) + a nova mensagem (texto ou blocos multimodais).
         messages: list[dict] = [
             {"role": m["role"], "content": m["content"]}
             for m in (db.get_recent_messages(user_id) if persist else [])
         ]
-        messages.append({"role": "user", "content": user_text})
+        messages.append({"role": "user", "content": user_content})
 
         reply_text = await self._run_loop(user_id, messages)
 
         if persist:
-            db.add_message(user_id, "user", user_text)
+            db.add_message(user_id, "user", persist_text)
             db.add_message(user_id, "assistant", reply_text)
         return reply_text
 

@@ -14,6 +14,7 @@ resumo semi-pronto.
 - ⏰ **Lembretes proativos**: agenda lembretes (únicos ou recorrentes) e te avisa na hora.
 - ☀️ **Resumo diário**: toda manhã manda o que priorizar hoje, em que ordem e o próximo passo.
 - 🎯 **Priorização em tempo real**: pergunte "o que faço agora?" e ele decide com base na sua agenda.
+- 📎 **Imagens, PDFs e arquivos**: envie um print, boleto, contrato ou ementa e ele lê o conteúdo e organiza em cima disso.
 - 📅 **Google Agenda** (opcional): lê seus compromissos, evita conflitos e cria/remarca eventos ao montar planos.
 - 🔎 **Busca na web**: pesquisa opções (ex.: empresas de mudança) e traz um comparativo resumido.
 
