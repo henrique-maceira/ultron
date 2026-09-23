@@ -55,7 +55,12 @@ def main() -> None:
     hist = db.get_recent_messages(USER)
     assert [m["role"] for m in hist] == ["user", "assistant"], hist
 
-    os.unlink(tmp.name)
+    try:
+        os.unlink(tmp.name)
+    except OSError:
+        # No Windows o arquivo pode ficar travado por conexões já fechadas do SQLite;
+        # a limpeza do temporário não é crítica para o teste.
+        pass
     print("OK: todas as verificações do banco passaram.")
 
 
