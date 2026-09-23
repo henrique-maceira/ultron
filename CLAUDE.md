@@ -34,7 +34,13 @@ Idioma de todo texto voltado ao usuário e dos comentários: **português (BR)**
   account — precisa acessar agenda pessoal `@gmail`). Ligado por `GOOGLE_CALENDAR_ENABLED`.
   Ferramentas só entram no set quando habilitado (`tools.all_tool_defs`). Imports do Google
   são **lazy** em `gcal.py` (não quebrar `check_db.py` offline).
-- **Persistência:** SQLite (`assistant/db.py`).
+- **Agente estratégico (Fase 1):** além de tarefas/lembretes, há **metas** (`goals`) e
+  **etapas** (`steps`) como entidades de 1ª classe. O fluxo é: objetivo → `create_goal` →
+  decompor em `add_step` datadas (com marcos) → agendar blocos na agenda → acompanhar via
+  progresso (`get_goal_plan`, `get_agenda`). Persona = chefe de gabinete estratégico
+  (`prompts.py`). Cadências recorrentes usam `reminders`.
+- **Persistência:** SQLite (`assistant/db.py`). Migração de schema é implícita
+  (`CREATE TABLE IF NOT EXISTS` em `init_db`); não há ferramenta de migração — evolua com cuidado.
 - **Proatividade:** `JobQueue` do `python-telegram-bot` (um só event loop, sem agendador
   extra).
 - **Fuso:** `America/Sao_Paulo`, via `zoneinfo` + pacote `tzdata`.
@@ -46,13 +52,13 @@ main.py                 # entrypoint: liga banco, cérebro, bot e jobs; roda lon
 config.py               # Config a partir do .env (load_config)
 assistant/
   brain.py              # Brain (abstrata) + AnthropicBrain (loop de tool-use + web_search); get_brain()
-  tools.py              # TOOL_DEFS + CALENDAR_TOOL_DEFS + all_tool_defs() + execute_tool()
+  tools.py              # TOOL_DEFS (tarefas/lembretes/metas/etapas) + CALENDAR_TOOL_DEFS + all_tool_defs()
   gcal.py               # cliente Google Agenda (OAuth token + eventos); imports do Google são lazy
-  db.py                 # SQLite: tasks, reminders, messages, settings + CRUD; configure()
-  prompts.py            # system_prompt(tz, calendar_enabled): persona PT-BR + regras
+  db.py                 # SQLite: tasks, reminders, goals, steps, messages, settings + CRUD; configure()
+  prompts.py            # system_prompt(tz, calendar_enabled): persona estratégica PT-BR + regras
 bot/
   telegram_bot.py       # build_application(config, brain): handlers /start,/help,texto; restrito ao dono
-  jobs.py               # register_jobs(): lembretes (60s) + resumo diário (BRIEFING_TIME)
+  jobs.py               # register_jobs(): lembretes (60s) + briefing diário + revisão semanal (dom 19h)
 scripts/
   check_db.py           # teste offline do banco (sem rede/API)
   gcal_auth.py          # bootstrap OAuth do Google Agenda (roda uma vez, com navegador)
@@ -124,5 +130,9 @@ Dockerfile, docker-compose.yml, .dockerignore, data/.gitkeep   # deploy 24/7
 - (a) Suporte a **Discord** (nova subclasse não é preciso; reusar `Brain`, novo adaptador de bot).
 - (b) **Testes automatizados** de `tools.py` e do loop de `brain.py` (com API mockada).
 - (c) ~~Integração com **Google Calendar**~~ — **feito** (`gcal.py` + ferramentas de agenda).
-      Próximo: sugestão de horários livres (free/busy) e sincronizar tarefas com prazo → eventos.
+- (e) ~~**Agente estratégico** (metas/etapas/cronograma)~~ — **Fase 1 feita**. Próximas fases:
+      Fase 2 = acompanhamento de progresso mais rico + replanejamento automático quando atrasa;
+      Fase 3 = dependências entre etapas, sugestão de horários livres (free/busy) e
+      **registro de gastos** (tabela de despesas + orçamento) para a meta financeira validar
+      de verdade (hoje o dono envia gastos como mensagem; ainda não há persistência estruturada).
 - (d) **CI** (GitHub Actions) validando `build` do Docker + `check_db.py` + lint.

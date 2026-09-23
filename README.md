@@ -9,6 +9,7 @@ resumo semi-pronto.
 
 ## O que ele faz
 
+- 🧭 **Metas e cronogramas**: você passa um objetivo maior e ele quebra em etapas datadas, com marcos, e acompanha o progresso.
 - 📝 **Tarefas**: cria, lista, atualiza e conclui afazeres por categoria e prioridade.
 - ⏰ **Lembretes proativos**: agenda lembretes (únicos ou recorrentes) e te avisa na hora.
 - ☀️ **Resumo diário**: toda manhã manda o que priorizar hoje, em que ordem e o próximo passo.
@@ -26,9 +27,9 @@ main.py                 # entrypoint: liga banco, cérebro, bot e jobs; roda lon
 config.py               # carrega variáveis do .env
 assistant/
   brain.py              # abstração de IA + AnthropicBrain (loop de ferramentas + busca web)
-  tools.py              # ferramentas (tarefas/lembretes/agenda) expostas ao modelo
+  tools.py              # ferramentas (tarefas/lembretes/metas/etapas/agenda) expostas ao modelo
   gcal.py               # cliente do Google Agenda (OAuth + eventos)
-  db.py                 # SQLite: tasks, reminders, messages, settings
+  db.py                 # SQLite: tasks, reminders, goals, steps, messages, settings
   prompts.py            # persona e regras (system prompt) em PT-BR
 bot/
   telegram_bot.py       # handlers do Telegram (restrito ao dono)
@@ -208,6 +209,9 @@ arquivos em `./data` já são montados no container, então o token é reaprovei
 - "o que tenho na agenda essa semana?"
 - "marca dentista quinta 15h e me lembra 1h antes"
 - "remarca a reunião de amanhã para as 16h"
+- "minha meta é tirar a certificação AWS até dezembro — monta o cronograma"
+- "como estão minhas metas?"
+- "conclui a etapa 3 da mudança"
 
 ## Verificação rápida (sem API)
 
