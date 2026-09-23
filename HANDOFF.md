@@ -63,5 +63,7 @@ Comece resumindo seu entendimento e o plano antes de editar.
 
 - (a) Discord (reusar o `Brain`, novo adaptador de bot).
 - (b) Testes automatizados de `tools.py` e do loop de `brain.py` (API mockada).
-- (c) Integração com Google Calendar.
+- (c) ~~Integração com Google Calendar~~ — **feito** (ver `assistant/gcal.py`, ferramentas de
+      agenda em `tools.py`, setup no README seção "Integração com o Google Agenda").
+      Próximo: free/busy (sugerir horários livres) e espelhar tarefas com prazo em eventos.
 - (d) CI (GitHub Actions): build do Docker + `check_db.py` + lint.

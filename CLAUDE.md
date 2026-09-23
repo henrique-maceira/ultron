@@ -30,6 +30,10 @@ Idioma de todo texto voltado ao usuário e dos comentários: **português (BR)**
   provedor** (`Brain` em `assistant/brain.py`) para permitir trocar de IA por config.
 - **Busca online:** ferramenta servidora nativa do Claude `web_search_20260209` (sem API
   de busca externa).
+- **Google Agenda (opcional):** OAuth "Desktop app" com token persistido (não service
+  account — precisa acessar agenda pessoal `@gmail`). Ligado por `GOOGLE_CALENDAR_ENABLED`.
+  Ferramentas só entram no set quando habilitado (`tools.all_tool_defs`). Imports do Google
+  são **lazy** em `gcal.py` (não quebrar `check_db.py` offline).
 - **Persistência:** SQLite (`assistant/db.py`).
 - **Proatividade:** `JobQueue` do `python-telegram-bot` (um só event loop, sem agendador
   extra).
@@ -42,14 +46,16 @@ main.py                 # entrypoint: liga banco, cérebro, bot e jobs; roda lon
 config.py               # Config a partir do .env (load_config)
 assistant/
   brain.py              # Brain (abstrata) + AnthropicBrain (loop de tool-use + web_search); get_brain()
-  tools.py              # TOOL_DEFS (schemas) + execute_tool() -> handlers no db
+  tools.py              # TOOL_DEFS + CALENDAR_TOOL_DEFS + all_tool_defs() + execute_tool()
+  gcal.py               # cliente Google Agenda (OAuth token + eventos); imports do Google são lazy
   db.py                 # SQLite: tasks, reminders, messages, settings + CRUD; configure()
-  prompts.py            # system_prompt(tz): persona PT-BR + regras
+  prompts.py            # system_prompt(tz, calendar_enabled): persona PT-BR + regras
 bot/
   telegram_bot.py       # build_application(config, brain): handlers /start,/help,texto; restrito ao dono
   jobs.py               # register_jobs(): lembretes (60s) + resumo diário (BRIEFING_TIME)
 scripts/
   check_db.py           # teste offline do banco (sem rede/API)
+  gcal_auth.py          # bootstrap OAuth do Google Agenda (roda uma vez, com navegador)
   update.ps1 / update.sh# auto-update: git pull + rebuild do container só se HEAD mudou
 Dockerfile, docker-compose.yml, .dockerignore, data/.gitkeep   # deploy 24/7
 ```
@@ -107,6 +113,9 @@ Dockerfile, docker-compose.yml, .dockerignore, data/.gitkeep   # deploy 24/7
 - **Lembretes:** `due_reminders()` compara strings ISO locais lexicalmente; mantenha o
   mesmo formato (`bot/jobs.py::LOCAL_FMT`).
 - **Privacidade:** o bot só responde ao `OWNER_TELEGRAM_ID`. Não relaxe isso.
+- **Google Agenda:** datas de negócio continuam ISO local ingênuo; a conversão p/ RFC3339
+  com fuso acontece só na borda em `gcal.py`. Não importe libs do Google no topo dos módulos
+  (mantenha lazy). Credenciais/token ficam em `data/` e **não** são versionados.
 - **LLM/Anthropic:** ao mexer em qualquer coisa de modelo/SDK, **carregue a skill
   `claude-api`** e não invente IDs de modelo nem parâmetros.
 
@@ -114,5 +123,6 @@ Dockerfile, docker-compose.yml, .dockerignore, data/.gitkeep   # deploy 24/7
 
 - (a) Suporte a **Discord** (nova subclasse não é preciso; reusar `Brain`, novo adaptador de bot).
 - (b) **Testes automatizados** de `tools.py` e do loop de `brain.py` (com API mockada).
-- (c) Integração com **Google Calendar** (ferramentas de leitura/escrita de eventos).
+- (c) ~~Integração com **Google Calendar**~~ — **feito** (`gcal.py` + ferramentas de agenda).
+      Próximo: sugestão de horários livres (free/busy) e sincronizar tarefas com prazo → eventos.
 - (d) **CI** (GitHub Actions) validando `build` do Docker + `check_db.py` + lint.

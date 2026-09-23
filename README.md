@@ -13,6 +13,7 @@ resumo semi-pronto.
 - ⏰ **Lembretes proativos**: agenda lembretes (únicos ou recorrentes) e te avisa na hora.
 - ☀️ **Resumo diário**: toda manhã manda o que priorizar hoje, em que ordem e o próximo passo.
 - 🎯 **Priorização em tempo real**: pergunte "o que faço agora?" e ele decide com base na sua agenda.
+- 📅 **Google Agenda** (opcional): lê seus compromissos, evita conflitos e cria/remarca eventos ao montar planos.
 - 🔎 **Busca na web**: pesquisa opções (ex.: empresas de mudança) e traz um comparativo resumido.
 
 O "cérebro" é o **Claude Sonnet 5** (Anthropic), com uma camada de abstração de provedor
@@ -25,7 +26,8 @@ main.py                 # entrypoint: liga banco, cérebro, bot e jobs; roda lon
 config.py               # carrega variáveis do .env
 assistant/
   brain.py              # abstração de IA + AnthropicBrain (loop de ferramentas + busca web)
-  tools.py              # ferramentas (tarefas/lembretes) expostas ao modelo
+  tools.py              # ferramentas (tarefas/lembretes/agenda) expostas ao modelo
+  gcal.py               # cliente do Google Agenda (OAuth + eventos)
   db.py                 # SQLite: tasks, reminders, messages, settings
   prompts.py            # persona e regras (system prompt) em PT-BR
 bot/
@@ -33,6 +35,7 @@ bot/
   jobs.py               # jobs proativos: lembretes e resumo diário
 scripts/
   check_db.py           # teste rápido do banco, sem rede/API
+  gcal_auth.py          # bootstrap OAuth do Google Agenda (roda uma vez)
 ```
 
 ## Pré-requisitos
@@ -66,6 +69,10 @@ Variáveis do `.env` (as opcionais têm padrão):
 | `TIMEZONE` | não | `America/Sao_Paulo` | Fuso horário (IANA) |
 | `BRIEFING_TIME` | não | `08:00` | Horário do resumo diário (HH:MM) |
 | `DB_PATH` | não | `ultron.db` | Caminho do banco SQLite |
+| `GOOGLE_CALENDAR_ENABLED` | não | `false` | Liga as ferramentas de agenda (ver seção abaixo) |
+| `GOOGLE_CREDENTIALS_PATH` | não | `data/google_credentials.json` | JSON do cliente OAuth (Desktop app) |
+| `GOOGLE_TOKEN_PATH` | não | `data/google_token.json` | Token gerado no bootstrap OAuth |
+| `GOOGLE_CALENDAR_ID` | não | `primary` | Qual agenda usar |
 
 ## Como rodar
 
@@ -151,6 +158,44 @@ container automaticamente. (No Linux/macOS, o equivalente é um `cron` chamando
 > Requisito: a máquina precisa conseguir dar `git pull` do repositório (repositório público,
 > ou credenciais/PAT do GitHub configuradas no `git` da máquina).
 
+## Integração com o Google Agenda (opcional)
+
+Com isso o Ultron passa a **ler e escrever na sua agenda**: consulta o que já está marcado
+para não sugerir horários em conflito e cria/remarca compromissos (consultas, reuniões,
+blocos de foco) quando vocês montam um plano.
+
+A autorização usa OAuth com um token salvo. Você faz o consentimento no navegador **uma
+única vez**; depois o token se renova sozinho (funciona no Docker, sem navegador).
+
+**1. Crie a credencial OAuth (uma vez, no Google Cloud Console):**
+
+1. Acesse https://console.cloud.google.com/ e crie (ou escolha) um projeto.
+2. Em *APIs e serviços → Biblioteca*, habilite a **Google Calendar API**.
+3. Em *APIs e serviços → Tela de permissão OAuth*, configure como *Externo* e adicione seu
+   e-mail Google em **Usuários de teste** (senão o consentimento é bloqueado).
+4. Em *APIs e serviços → Credenciais → Criar credenciais → ID do cliente OAuth*, tipo
+   **App para computador** (Desktop app). Baixe o JSON e salve em
+   `data/google_credentials.json`.
+
+**2. Autorize (uma vez, na sua máquina com navegador):**
+
+```bash
+python scripts/gcal_auth.py
+```
+Isso abre o navegador para você logar e consentir; ao final, grava
+`data/google_token.json` (o refresh token).
+
+**3. Ligue a integração** no `.env`:
+
+```
+GOOGLE_CALENDAR_ENABLED=true
+```
+Reinicie o Ultron (`python main.py` ou `docker compose up -d --build`). No Docker, os
+arquivos em `./data` já são montados no container, então o token é reaproveitado.
+
+> ⚠️ `data/google_credentials.json` e `data/google_token.json` **não** são versionados
+> (estão no `.gitignore`). Trate-os como segredos.
+
 ## Exemplos de conversa
 
 - "adiciona tarefa: montar as caixas da mudança, prioridade alta, categoria mudança"
@@ -160,6 +205,9 @@ container automaticamente. (No Linux/macOS, o equivalente é um `cron` chamando
 - "me lembra de ligar pro corretor amanhã 10h"
 - "pesquisa empresas de mudança em São Paulo e me resume as melhores opções"
 - "o que eu devo priorizar hoje?"
+- "o que tenho na agenda essa semana?"
+- "marca dentista quinta 15h e me lembra 1h antes"
+- "remarca a reunião de amanhã para as 16h"
 
 ## Verificação rápida (sem API)
 
