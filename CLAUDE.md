@@ -44,8 +44,12 @@ Idioma de todo texto voltado ao usuário e dos comentários: **português (BR)**
   decompor em `add_step` datadas (com marcos) → agendar blocos na agenda → acompanhar via
   progresso (`get_goal_plan`, `get_agenda`). Persona = chefe de gabinete estratégico
   (`prompts.py`). Cadências recorrentes usam `reminders`.
-- **Persistência:** SQLite (`assistant/db.py`). Migração de schema é implícita
-  (`CREATE TABLE IF NOT EXISTS` em `init_db`); não há ferramenta de migração — evolua com cuidado.
+- **Persistência:** SQLite (`assistant/db.py`). Tabelas: tasks, reminders, goals, steps,
+  expenses, budgets, messages, settings. Migração de schema é leve: tabelas via
+  `CREATE TABLE IF NOT EXISTS`; colunas novas em tabelas existentes via `_ensure_column`
+  (ALTER TABLE guardado por PRAGMA). Não há framework de migração — evolua com cuidado.
+- **Loop do cérebro:** `MAX_TOKENS=8192`; em `max_tokens` o loop RETOMA a geração e acumula
+  o texto (antes truncava e respondia só "Ok."). Fallback vazio explícito, não silencioso.
 - **Proatividade:** `JobQueue` do `python-telegram-bot` (um só event loop, sem agendador
   extra).
 - **Fuso:** `America/Sao_Paulo`, via `zoneinfo` + pacote `tzdata`.
@@ -144,7 +148,9 @@ Dockerfile, docker-compose.yml, .dockerignore, data/.gitkeep   # deploy 24/7
       briefing/revisão semanal acionam replanejamento; **regra: nunca altera meta/etapa/evento
       sem confirmação do dono** (só criar item novo pedido explicitamente dispensa confirmação).
       `tools.configure(tz)` dá o fuso aos handlers (datas de negócio são locais).
-      Fase 3 (pendente) = dependências entre etapas, horários livres (free/busy) e
-      **registro de gastos** (tabela de despesas + orçamento) para a meta financeira validar
-      de verdade (hoje o dono envia gastos como mensagem; ainda não há persistência estruturada).
+      **Fase 3 feita** = dependências entre etapas (`steps.depends_on`, migração via
+      `_ensure_column`; `get_goal_plan` marca `bloqueada`); horários livres
+      (`gcal.find_free_slots` + tool `find_free_slots`, ignora eventos de dia inteiro);
+      finanças (`expenses`/`budgets`, tools `log_expense`/`get_expense_summary`/`set_budget`/
+      `list_budgets`; `budget_status` compara gasto vs. teto no mês).
 - (d) **CI** (GitHub Actions) validando `build` do Docker + `check_db.py` + lint.

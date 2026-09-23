@@ -105,8 +105,35 @@ def init_db() -> None:
                 timezone     TEXT,
                 briefing_time TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS expenses (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL,
+                amount      REAL    NOT NULL,
+                category    TEXT,
+                description TEXT,
+                spent_on    TEXT    NOT NULL,   -- data local YYYY-MM-DD
+                created_at  TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS budgets (
+                user_id       INTEGER NOT NULL,
+                category      TEXT    NOT NULL,
+                monthly_limit REAL    NOT NULL,
+                updated_at    TEXT    NOT NULL,
+                PRIMARY KEY (user_id, category)
+            );
             """
         )
+        _ensure_column(conn, "steps", "depends_on", "INTEGER")
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    """Adiciona uma coluna se ainda não existir (migração leve; init_db usa IF NOT EXISTS
+    para tabelas, mas colunas novas em tabelas já criadas precisam de ALTER TABLE)."""
+    cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 # --------------------------------------------------------------------------- #
@@ -340,6 +367,7 @@ def create_step(
     due_date: Optional[str] = None,
     is_milestone: bool = False,
     order_index: Optional[int] = None,
+    depends_on: Optional[int] = None,
 ) -> dict[str, Any]:
     now = _utc_now()
     with _conn() as conn:
@@ -349,6 +377,12 @@ def create_step(
         ).fetchone()
         if not owner:
             raise ValueError(f"Meta {goal_id} não encontrada para o usuário.")
+        if depends_on is not None:
+            dep = conn.execute(
+                "SELECT 1 FROM steps WHERE id = ? AND user_id = ?", (depends_on, user_id)
+            ).fetchone()
+            if not dep:
+                raise ValueError(f"Etapa dependência {depends_on} não encontrada.")
         if order_index is None:
             row = conn.execute(
                 "SELECT COALESCE(MAX(order_index), 0) + 1 AS nxt FROM steps WHERE goal_id = ?",
@@ -357,9 +391,10 @@ def create_step(
             order_index = row["nxt"]
         cur = conn.execute(
             """INSERT INTO steps (goal_id, user_id, title, notes, due_date, is_milestone,
-                                  order_index, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?)""",
-            (goal_id, user_id, title, notes, due_date, int(bool(is_milestone)), order_index, now, now),
+                                  order_index, status, depends_on, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)""",
+            (goal_id, user_id, title, notes, due_date, int(bool(is_milestone)),
+             order_index, depends_on, now, now),
         )
         row = conn.execute("SELECT * FROM steps WHERE id = ?", (cur.lastrowid,)).fetchone()
         return dict(row)
@@ -392,7 +427,7 @@ def get_step(user_id: int, step_id: int) -> Optional[dict[str, Any]]:
 
 
 def update_step(user_id: int, step_id: int, **fields: Any) -> Optional[dict[str, Any]]:
-    allowed = {"title", "notes", "due_date", "is_milestone", "order_index", "status"}
+    allowed = {"title", "notes", "due_date", "is_milestone", "order_index", "status", "depends_on"}
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if "is_milestone" in updates:
         updates["is_milestone"] = int(bool(updates["is_milestone"]))
@@ -411,13 +446,21 @@ def complete_step(user_id: int, step_id: int) -> Optional[dict[str, Any]]:
 
 
 def get_goal_plan(user_id: int, goal_id: int) -> Optional[dict[str, Any]]:
-    """Meta + suas etapas + progresso, para revisar/atualizar o cronograma."""
+    """Meta + suas etapas + progresso, para revisar/atualizar o cronograma.
+
+    Cada etapa recebe `bloqueada` = True quando depende de outra ainda não concluída.
+    """
     goal = get_goal(user_id, goal_id)
     if not goal:
         return None
     with _conn() as conn:
         goal.update(_goal_progress(conn, goal_id))
-    goal["etapas"] = list_steps(user_id, goal_id=goal_id)
+    etapas = list_steps(user_id, goal_id=goal_id)
+    por_id = {s["id"]: s for s in etapas}
+    for s in etapas:
+        dep = s.get("depends_on")
+        s["bloqueada"] = bool(dep and por_id.get(dep) and por_id[dep]["status"] != "concluida")
+    goal["etapas"] = etapas
     return goal
 
 
@@ -492,6 +535,124 @@ def goals_health(
             }
         )
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Finanças: gastos (expenses) e orçamento (budgets)
+# --------------------------------------------------------------------------- #
+def add_expense(
+    user_id: int,
+    amount: float,
+    category: Optional[str] = None,
+    description: Optional[str] = None,
+    spent_on: Optional[str] = None,
+) -> dict[str, Any]:
+    """Registra um gasto. `spent_on` é a data local (YYYY-MM-DD); sem ela, usa hoje UTC."""
+    now = _utc_now()
+    if not spent_on:
+        spent_on = now[:10]
+    spent_on = spent_on[:10]  # normaliza para só a data
+    with _conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO expenses (user_id, amount, category, description, spent_on, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user_id, float(amount), category, description, spent_on, now),
+        )
+        row = conn.execute("SELECT * FROM expenses WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return dict(row)
+
+
+def list_expenses(
+    user_id: int,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    query = "SELECT * FROM expenses WHERE user_id = ?"
+    params: list[Any] = [user_id]
+    if since:
+        query += " AND spent_on >= ?"
+        params.append(since[:10])
+    if until:
+        query += " AND spent_on <= ?"
+        params.append(until[:10])
+    query += " ORDER BY spent_on DESC, id DESC"
+    with _conn() as conn:
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def delete_expense(user_id: int, expense_id: int) -> bool:
+    with _conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM expenses WHERE id = ? AND user_id = ?", (expense_id, user_id)
+        )
+        return cur.rowcount > 0
+
+
+def set_budget(user_id: int, category: str, monthly_limit: float) -> dict[str, Any]:
+    """Define/atualiza o teto mensal de gastos de uma categoria."""
+    now = _utc_now()
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO budgets (user_id, category, monthly_limit, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(user_id, category)
+               DO UPDATE SET monthly_limit = excluded.monthly_limit, updated_at = excluded.updated_at""",
+            (user_id, category, float(monthly_limit), now),
+        )
+        row = conn.execute(
+            "SELECT * FROM budgets WHERE user_id = ? AND category = ?", (user_id, category)
+        ).fetchone()
+        return dict(row)
+
+
+def list_budgets(user_id: int) -> list[dict[str, Any]]:
+    with _conn() as conn:
+        return [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM budgets WHERE user_id = ? ORDER BY category", (user_id,)
+            ).fetchall()
+        ]
+
+
+def budget_status(user_id: int, year_month: str) -> dict[str, Any]:
+    """Compara gastos do mês (YYYY-MM) com o orçamento por categoria.
+
+    Retorna: total gasto, por categoria (gasto/limite/restante/pct) e o dia do mês.
+    """
+    ym = year_month[:7]
+    with _conn() as conn:
+        gastos = conn.execute(
+            """SELECT COALESCE(category, 'sem_categoria') AS category, SUM(amount) AS gasto
+               FROM expenses WHERE user_id = ? AND substr(spent_on, 1, 7) = ?
+               GROUP BY COALESCE(category, 'sem_categoria')""",
+            (user_id, ym),
+        ).fetchall()
+        limites = {b["category"]: b["monthly_limit"] for b in list_budgets(user_id)}
+
+    gasto_por_cat = {g["category"]: g["gasto"] for g in gastos}
+    categorias = sorted(set(gasto_por_cat) | set(limites))
+    linhas = []
+    total_gasto = 0.0
+    total_limite = 0.0
+    for cat in categorias:
+        gasto = round(gasto_por_cat.get(cat, 0.0), 2)
+        limite = limites.get(cat)
+        total_gasto += gasto
+        item: dict[str, Any] = {"categoria": cat, "gasto": gasto, "limite": limite}
+        if limite:
+            total_limite += limite
+            item["restante"] = round(limite - gasto, 2)
+            item["pct"] = round(100 * gasto / limite) if limite else None
+            item["estourou"] = gasto > limite
+        linhas.append(item)
+
+    return {
+        "mes": ym,
+        "total_gasto": round(total_gasto, 2),
+        "total_orcamento": round(total_limite, 2) if total_limite else None,
+        "por_categoria": linhas,
+    }
 
 
 # --------------------------------------------------------------------------- #

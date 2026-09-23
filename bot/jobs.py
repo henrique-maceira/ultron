@@ -24,7 +24,8 @@ BRIEFING_PROMPT = (
     "tarefas, lembretes e compromissos. Depois me diga, de forma curta e motivadora: (1) em qual meta "
     "focar hoje e por quê, (2) as 1–3 etapas/tarefas mais importantes do dia, em ordem, (3) o que está "
     "atrasado ou em risco — e, se for o caso, PROPONHA um replanejamento (sem alterar nada ainda; peça "
-    "meu ok), (4) os horários da agenda de hoje, e (5) um único próximo passo para começar agora."
+    "meu ok), (4) os horários da agenda de hoje, e (5) um único próximo passo para começar agora. "
+    "Se eu tiver orçamento definido, inclua uma linha curta do status financeiro do mês (get_expense_summary)."
 )
 
 WEEKLY_REVIEW_PROMPT = (

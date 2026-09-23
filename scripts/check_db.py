@@ -83,10 +83,37 @@ def main() -> None:
     assert [a["id"] for a in h["etapas_atrasadas"]] == [s2["id"]], h["etapas_atrasadas"]
     assert h["parada"] is True, h  # sem progresso recente, ainda há etapa pendente
 
+    # --- Dependências entre etapas (Fase 3) ---
+    g2 = db.create_goal(USER, "Projeto X", category="projeto")
+    base = db.create_step(USER, g2["id"], "Fazer A")
+    dependente = db.create_step(USER, g2["id"], "Fazer B (depende de A)", depends_on=base["id"])
+    plano = db.get_goal_plan(USER, g2["id"])
+    by_id = {s["id"]: s for s in plano["etapas"]}
+    assert by_id[dependente["id"]]["bloqueada"] is True, plano["etapas"]
+    db.complete_step(USER, base["id"])
+    plano = db.get_goal_plan(USER, g2["id"])
+    by_id = {s["id"]: s for s in plano["etapas"]}
+    assert by_id[dependente["id"]]["bloqueada"] is False  # dependência concluída, liberou
+
     db.update_goal(USER, g["id"], status="concluido")
+    db.update_goal(USER, g2["id"], status="concluido")
     assert db.list_goals(USER) == []  # só ativas por padrão
-    assert len(db.list_goals(USER, status=None)) == 1  # todas
+    assert len(db.list_goals(USER, status=None)) == 2  # todas
     assert db.goals_health(USER, "2026-11-25T12:00:00", "2026-11-25T15:00:00+00:00") == []
+
+    # --- Finanças: gastos e orçamento (Fase 3) ---
+    db.set_budget(USER, "mercado", 1000.0)
+    db.add_expense(USER, 250.0, category="mercado", description="compra do mês", spent_on="2026-09-10")
+    db.add_expense(USER, 800.0, category="mercado", spent_on="2026-09-20")
+    db.add_expense(USER, 50.0, category="transporte", spent_on="2026-09-20")
+    status = db.budget_status(USER, "2026-09")
+    assert status["total_gasto"] == 1100.0, status
+    merc = next(c for c in status["por_categoria"] if c["categoria"] == "mercado")
+    assert merc["gasto"] == 1050.0 and merc["limite"] == 1000.0 and merc["estourou"] is True, merc
+    assert merc["restante"] == -50.0 and merc["pct"] == 105, merc
+    trans = next(c for c in status["por_categoria"] if c["categoria"] == "transporte")
+    assert trans["gasto"] == 50.0 and trans["limite"] is None, trans
+    assert db.budget_status(USER, "2026-10")["total_gasto"] == 0.0  # outro mês
 
     # --- Histórico ---
     db.add_message(USER, "user", "oi")

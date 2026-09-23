@@ -11,6 +11,7 @@ Para trocar de provedor no futuro (Gemini, OpenAI), basta criar outra subclasse 
 from __future__ import annotations
 
 import abc
+import logging
 from typing import Any
 
 from anthropic import AsyncAnthropic
@@ -20,9 +21,19 @@ from config import Config
 from . import db, tools
 from .prompts import system_prompt
 
+logger = logging.getLogger(__name__)
+
 # Limite de segurança para o número de idas e voltas de ferramentas num único turno.
 MAX_TOOL_ITERATIONS = 12
-MAX_TOKENS = 4096
+# Teto de saída por chamada. Com thinking adaptativo ligado, o raciocínio consome parte
+# do orçamento; 4096 era pequeno e truncava a resposta (o bot respondia só "Ok."). 8192
+# dá folga para thinking + texto numa resposta de chat.
+MAX_TOKENS = 8192
+
+# Fallback quando, mesmo após retomar, não veio texto algum (evita o antigo "Ok." mudo).
+EMPTY_REPLY_FALLBACK = (
+    "Desculpa, embolei a resposta aqui e ela saiu vazia. Pode repetir ou detalhar um pouco?"
+)
 
 # Ferramenta servidora de busca na web (roda na infraestrutura da Anthropic).
 WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 5}
@@ -90,6 +101,7 @@ class AnthropicBrain(Brain):
 
     async def _run_loop(self, user_id: int, messages: list[dict]) -> str:
         system = system_prompt(self._config.tz, self._config.google_calendar_enabled)
+        answer = ""  # acumula o texto visível ao longo de retomadas/idas de ferramenta
 
         for _ in range(MAX_TOOL_ITERATIONS):
             response = await self._client.messages.create(
@@ -117,15 +129,26 @@ class AnthropicBrain(Brain):
             if response.stop_reason == "tool_use":
                 tool_results = self._handle_tool_calls(user_id, response)
                 if not tool_results:
-                    # Nenhuma ferramenta local para executar; devolve o que houver de texto.
-                    return self._extract_text(response) or "Ok."
+                    # Sinalizou tool_use mas não há ferramenta local; devolve o texto que houver.
+                    return (answer + self._extract_text(response)) or EMPTY_REPLY_FALLBACK
                 messages.append({"role": "user", "content": tool_results})
                 continue
 
-            # end_turn / max_tokens
-            return self._extract_text(response) or "Ok."
+            if response.stop_reason == "max_tokens":
+                # Resposta truncada (o thinking pode ter consumido o orçamento). Acumula o
+                # que veio e RETOMA a geração em vez de responder vazio/"Ok.".
+                answer += self._extract_text(response)
+                logger.warning("Resposta truncada por max_tokens; retomando a geração.")
+                continue
 
-        return "Isso ficou mais longo que o esperado — pode reformular ou dividir o pedido?"
+            # end_turn / stop_sequence
+            answer += self._extract_text(response)
+            if not answer:
+                logger.warning("Turno terminou sem texto (stop_reason=%s).", response.stop_reason)
+            return answer or EMPTY_REPLY_FALLBACK
+
+        # Esgotou as iterações: devolve o que acumulou, senão um aviso.
+        return answer or "Isso ficou mais longo que o esperado — pode reformular ou dividir o pedido?"
 
     @staticmethod
     def _handle_tool_calls(user_id: int, response) -> list[dict]:

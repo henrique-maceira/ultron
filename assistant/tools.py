@@ -209,6 +209,7 @@ TOOL_DEFS: list[dict[str, Any]] = [
                 "due_date": {"type": "string", "description": "Prazo da etapa em ISO 8601 local."},
                 "is_milestone": {"type": "boolean", "description": "True se for um marco/checkpoint."},
                 "order_index": {"type": "integer", "description": "Ordem manual (opcional; senão vai pro fim)."},
+                "depends_on": {"type": "integer", "description": "ID de outra etapa que precisa terminar antes desta (dependência)."},
             },
             "required": ["goal_id", "title"],
         },
@@ -267,6 +268,55 @@ TOOL_DEFS: list[dict[str, Any]] = [
             "Com base nisso, PROPONHA ajustes ao usuário e só altere (update_step/update_goal) "
             "depois que ele confirmar."
         ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    # ----------------------------- Finanças --------------------------------- #
+    {
+        "name": "log_expense",
+        "description": (
+            "Registra um gasto do usuário (parte da organização financeira). Use quando ele informar "
+            "um gasto por texto ('gastei 80 no mercado') ou ao ler um comprovante/boleto. Uma mensagem "
+            "com vários gastos vira várias chamadas."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "amount": {"type": "number", "description": "Valor em reais (número, ex.: 80.50)."},
+                "category": {"type": "string", "description": "Categoria: mercado, transporte, lazer, moradia, saude, contas, outros."},
+                "description": {"type": "string", "description": "Descrição curta do gasto."},
+                "spent_on": {"type": "string", "description": "Data do gasto (YYYY-MM-DD). Omitir = hoje."},
+            },
+            "required": ["amount"],
+        },
+    },
+    {
+        "name": "get_expense_summary",
+        "description": (
+            "Resumo financeiro do mês: total gasto e, por categoria, gasto vs. orçamento (restante e %). "
+            "Use para validar se o usuário está no caminho e no briefing financeiro."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "month": {"type": "string", "description": "Mês YYYY-MM. Omitir = mês atual."},
+            },
+        },
+    },
+    {
+        "name": "set_budget",
+        "description": "Define/atualiza o teto mensal de gastos de uma categoria (ex.: mercado = 1200). É o 'contra o quê' validar os gastos.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "Categoria do orçamento."},
+                "monthly_limit": {"type": "number", "description": "Teto mensal em reais."},
+            },
+            "required": ["category", "monthly_limit"],
+        },
+    },
+    {
+        "name": "list_budgets",
+        "description": "Lista os orçamentos (tetos mensais) definidos por categoria.",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
@@ -341,6 +391,21 @@ CALENDAR_TOOL_DEFS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"event_id": {"type": "string", "description": "ID do evento."}},
             "required": ["event_id"],
+        },
+    },
+    {
+        "name": "find_free_slots",
+        "description": (
+            "Encontra janelas LIVRES na agenda para blocos de foco/estudo/execução, dentro do horário "
+            "de trabalho. Use antes de propor horários para não sugerir algo em cima do que já existe. "
+            "Depois de o usuário escolher, crie o compromisso com create_calendar_event."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "duration_minutes": {"type": "integer", "description": "Duração do bloco desejado (min). Padrão 60."},
+                "days_ahead": {"type": "integer", "description": "Quantos dias à frente procurar. Padrão 7."},
+            },
         },
     },
 ]
@@ -431,6 +496,7 @@ def _dispatch(user_id: int, name: str, args: dict[str, Any]) -> Any:
             due_date=args.get("due_date"),
             is_milestone=bool(args.get("is_milestone", False)),
             order_index=args.get("order_index"),
+            depends_on=args.get("depends_on"),
         )
     if name == "list_steps":
         return db.list_steps(user_id, goal_id=args.get("goal_id"), status=args.get("status"))
@@ -455,6 +521,23 @@ def _dispatch(user_id: int, name: str, args: dict[str, Any]) -> Any:
             now_local_iso=_now_local_iso(),
             now_utc_iso=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         )
+
+    # --- Finanças ---
+    if name == "log_expense":
+        return db.add_expense(
+            user_id,
+            amount=args["amount"],
+            category=args.get("category"),
+            description=args.get("description"),
+            spent_on=args.get("spent_on"),
+        )
+    if name == "get_expense_summary":
+        month = args.get("month") or _now_local_iso()[:7]
+        return db.budget_status(user_id, month)
+    if name == "set_budget":
+        return db.set_budget(user_id, category=args["category"], monthly_limit=args["monthly_limit"])
+    if name == "list_budgets":
+        return db.list_budgets(user_id)
 
     if name == "get_agenda":
         until = (datetime.now(_TZ) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
@@ -495,5 +578,10 @@ def _dispatch(user_id: int, name: str, args: dict[str, Any]) -> Any:
         )
     if name == "delete_calendar_event":
         return {"deleted": gcal.delete_event(args["event_id"])}
+    if name == "find_free_slots":
+        return gcal.find_free_slots(
+            days_ahead=int(args.get("days_ahead", 7)),
+            duration_minutes=int(args.get("duration_minutes", 60)),
+        )
 
     raise ValueError(f"Ferramenta desconhecida: {name}")

@@ -237,3 +237,54 @@ def delete_event(event_id: str) -> bool:
     service = _get_service()
     service.events().delete(calendarId=_CALENDAR_ID, eventId=event_id).execute()
     return True
+
+
+def find_free_slots(
+    days_ahead: int = 7,
+    duration_minutes: int = 60,
+    work_start_hour: int = 8,
+    work_end_hour: int = 22,
+    max_slots: int = 12,
+) -> list[dict[str, Any]]:
+    """Encontra janelas livres na agenda (dentro do horário de trabalho) para blocos de
+    `duration_minutes`. Ignora eventos de dia inteiro (costumam ser avisos, não bloqueios).
+    Retorna slots em ISO local ingênuo."""
+    now = dt.datetime.now(_TZ).replace(tzinfo=None, second=0, microsecond=0)
+    end_range = (now + dt.timedelta(days=days_ahead)).replace(hour=23, minute=59, second=59)
+    eventos = list_events(now.strftime(_LOCAL_FMT), end_range.strftime(_LOCAL_FMT), max_results=100)
+
+    busy: list[tuple[dt.datetime, dt.datetime]] = []
+    for e in eventos:
+        if e.get("all_day"):
+            continue
+        try:
+            s = dt.datetime.strptime(e["start"], _LOCAL_FMT)
+            en = dt.datetime.strptime(e["end"], _LOCAL_FMT)
+        except (ValueError, KeyError):
+            continue
+        busy.append((s, en))
+    busy.sort()
+
+    dur = dt.timedelta(minutes=duration_minutes)
+    slots: list[tuple[dt.datetime, dt.datetime]] = []
+    for d in range(days_ahead + 1):
+        day = (now + dt.timedelta(days=d)).date()
+        ws = dt.datetime.combine(day, dt.time(work_start_hour))
+        we = dt.datetime.combine(day, dt.time(work_end_hour))
+        cursor = max(ws, now) if d == 0 else ws
+        day_busy = sorted(
+            (max(s, ws), min(en, we)) for s, en in busy if en > ws and s < we
+        )
+        for bs, be in day_busy:
+            if bs - cursor >= dur:
+                slots.append((cursor, bs))
+            cursor = max(cursor, be)
+        if we - cursor >= dur:
+            slots.append((cursor, we))
+        if len(slots) >= max_slots:
+            break
+
+    return [
+        {"start": s.strftime(_LOCAL_FMT), "end": e.strftime(_LOCAL_FMT)}
+        for s, e in slots[:max_slots]
+    ]
