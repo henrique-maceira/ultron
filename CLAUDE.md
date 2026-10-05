@@ -26,8 +26,15 @@ Idioma de todo texto voltado ao usuário e dos comentários: **português (BR)**
 ## Decisões de arquitetura (não reverter sem motivo)
 
 - **Plataforma:** Telegram via long-polling (sem porta/URL pública).
-- **Cérebro:** Claude **Sonnet 5** (`claude-sonnet-5`), atrás de uma **abstração de
-  provedor** (`Brain` em `assistant/brain.py`) para permitir trocar de IA por config.
+- **Cérebro:** abstração de provedor (`Brain` em `assistant/brain.py`), escolhido por
+  `LLM_PROVIDER`. Dois provedores implementados: **anthropic** (`AnthropicBrain`,
+  `claude-sonnet-5`) e **gemini** (`GeminiBrain` em `assistant/gemini_brain.py`, tier
+  gratuito, `gemini-3.8-flash`). `get_brain()` valida a chave do provedor e importa o SDK
+  do Gemini de forma **lazy**. No Gemini: visão/PDF e todas as ferramentas funcionam, mas a
+  **busca web nativa fica desligada** (grounding do Google Search não é combinado com
+  function calling nesta versão); há retry com backoff para 429/503 do tier gratuito.
+  Atenção ao nome do modelo do Gemini: o free exige `gemini-3.8-flash` (2.5-flash foi
+  aposentado para novos usuários).
 - **Busca online:** ferramenta servidora nativa do Claude `web_search_20260209` (sem API
   de busca externa).
 - **Entrada multimodal:** o bot aceita imagens, PDFs e arquivos de texto no Telegram. Os

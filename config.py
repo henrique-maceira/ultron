@@ -13,6 +13,7 @@ load_dotenv()
 @dataclass(frozen=True)
 class Config:
     anthropic_api_key: str
+    gemini_api_key: str
     telegram_bot_token: str
     owner_telegram_id: int
     llm_provider: str
@@ -53,8 +54,10 @@ def _as_bool(name: str, default: bool = False) -> bool:
 
 
 def load_config() -> Config:
+    # As chaves de IA são opcionais aqui; get_brain() exige a do provedor escolhido.
     return Config(
-        anthropic_api_key=_require("ANTHROPIC_API_KEY"),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         telegram_bot_token=_require("TELEGRAM_BOT_TOKEN"),
         owner_telegram_id=int(_require("OWNER_TELEGRAM_ID")),
         llm_provider=os.getenv("LLM_PROVIDER", "anthropic"),

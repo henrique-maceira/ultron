@@ -170,8 +170,16 @@ class AnthropicBrain(Brain):
 def get_brain(config: Config) -> Brain:
     provider = config.llm_provider.lower()
     if provider == "anthropic":
+        if not config.anthropic_api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY ausente para LLM_PROVIDER=anthropic.")
         return AnthropicBrain(config)
+    if provider == "gemini":
+        if not config.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY ausente para LLM_PROVIDER=gemini.")
+        from .gemini_brain import GeminiBrain  # import tardio (SDK do Google)
+
+        return GeminiBrain(config)
     raise NotImplementedError(
         f"Provedor de IA '{provider}' ainda não implementado. "
-        "Use LLM_PROVIDER=anthropic ou adicione uma subclasse de Brain."
+        "Use LLM_PROVIDER=anthropic, LLM_PROVIDER=gemini ou adicione uma subclasse de Brain."
     )
