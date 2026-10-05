@@ -92,14 +92,20 @@ class AnthropicBrain(Brain):
         ]
         messages.append({"role": "user", "content": user_content})
 
-        reply_text = await self._run_loop(user_id, messages)
+        reply_text = await self._run_loop(user_id, messages, warn_claims=persist)
 
         if persist:
             db.add_message(user_id, "user", persist_text)
             db.add_message(user_id, "assistant", reply_text)
         return reply_text
 
-    async def _run_loop(self, user_id: int, messages: list[dict]) -> str:
+    async def _run_loop(self, user_id: int, messages: list[dict], warn_claims: bool = True) -> str:
+        """Roda o loop e devolve a resposta já com o recibo das gravações do turno."""
+        receipts: list[tuple[bool, str]] = []
+        text = await self._loop(user_id, messages, receipts)
+        return tools.finalize_reply(text, receipts, warn_claims)
+
+    async def _loop(self, user_id: int, messages: list[dict], receipts: list) -> str:
         system = system_prompt(self._config.tz, self._config.google_calendar_enabled)
         answer = ""  # acumula o texto visível ao longo de retomadas/idas de ferramenta
 
@@ -127,7 +133,7 @@ class AnthropicBrain(Brain):
                 continue
 
             if response.stop_reason == "tool_use":
-                tool_results = self._handle_tool_calls(user_id, response)
+                tool_results = self._handle_tool_calls(user_id, response, receipts)
                 if not tool_results:
                     # Sinalizou tool_use mas não há ferramenta local; devolve o texto que houver.
                     return (answer + self._extract_text(response)) or EMPTY_REPLY_FALLBACK
@@ -151,11 +157,14 @@ class AnthropicBrain(Brain):
         return answer or "Isso ficou mais longo que o esperado — pode reformular ou dividir o pedido?"
 
     @staticmethod
-    def _handle_tool_calls(user_id: int, response) -> list[dict]:
+    def _handle_tool_calls(user_id: int, response, receipts: list) -> list[dict]:
         results: list[dict] = []
         for block in response.content:
             if getattr(block, "type", None) == "tool_use":
                 output = tools.execute_tool(user_id, block.name, block.input)
+                receipt = tools.receipt_for(block.name, output)
+                if receipt:
+                    receipts.append(receipt)
                 results.append(
                     {"type": "tool_result", "tool_use_id": block.id, "content": output}
                 )

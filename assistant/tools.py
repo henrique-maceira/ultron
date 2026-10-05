@@ -12,8 +12,9 @@ horário absoluto correto.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from . import db, gcal
@@ -276,17 +277,46 @@ TOOL_DEFS: list[dict[str, Any]] = [
         "description": (
             "Registra um gasto do usuário (parte da organização financeira). Use quando ele informar "
             "um gasto por texto ('gastei 80 no mercado') ou ao ler um comprovante/boleto. Uma mensagem "
-            "com vários gastos vira várias chamadas."
+            "com vários gastos vira várias chamadas. Informe SEMPRE a forma de pagamento (se não souber, "
+            "pergunte) e, se foi dividido com a noiva, shared_with."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "amount": {"type": "number", "description": "Valor em reais (número, ex.: 80.50)."},
-                "category": {"type": "string", "description": "Categoria: mercado, transporte, lazer, moradia, saude, contas, outros."},
-                "description": {"type": "string", "description": "Descrição curta do gasto."},
-                "spent_on": {"type": "string", "description": "Data do gasto (YYYY-MM-DD). Omitir = hoje."},
+                "amount": {"type": "number", "description": "Valor TOTAL pago em reais (número, ex.: 80.50)."},
+                "category": {"type": "string", "description": "Categoria: mercado, alimentacao, lazer, transporte, moradia, saude, educacao, assinaturas, pets, outros."},
+                "description": {"type": "string", "description": "Descrição curta do gasto (estabelecimento/o que foi)."},
+                "spent_on": {"type": "string", "description": "Data do gasto (YYYY-MM-DD, fuso local). Omitir = hoje."},
+                "payment_method": {
+                    "type": "string",
+                    "enum": ["credito", "debito", "pix", "dinheiro", "vr", "va"],
+                    "description": "Forma de pagamento: credito (cartão de crédito), debito, pix, dinheiro, vr (vale refeição), va (vale alimentação).",
+                },
+                "shared_with": {"type": "string", "description": "Com quem o gasto foi dividido (ex.: 'noiva'). Omitir se foi só do usuário."},
+                "my_share": {"type": "number", "description": "Parte do usuário no gasto dividido. Omitir = metade do valor."},
             },
             "required": ["amount"],
+        },
+    },
+    {
+        "name": "update_expense",
+        "description": (
+            "Corrige um gasto já lançado (valor, categoria, descrição, data, forma de pagamento ou divisão). "
+            "Peça confirmação antes de alterar."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer", "description": "ID do gasto."},
+                "amount": {"type": "number"},
+                "category": {"type": "string"},
+                "description": {"type": "string"},
+                "spent_on": {"type": "string", "description": "Nova data YYYY-MM-DD."},
+                "payment_method": {"type": "string", "enum": ["credito", "debito", "pix", "dinheiro", "vr", "va"]},
+                "shared_with": {"type": "string"},
+                "my_share": {"type": "number"},
+            },
+            "required": ["id"],
         },
     },
     {
@@ -453,6 +483,72 @@ def execute_tool(user_id: int, name: str, tool_input: dict[str, Any]) -> str:
     return json.dumps({"ok": True, "result": result}, ensure_ascii=False, default=str)
 
 
+# --------------------------------------------------------------------------- #
+# Recibo de gravação (anti "confirmou mas não gravou")
+#
+# Os modelos às vezes dizem "✅ lançado" sem ter chamado a ferramenta de escrita (já
+# aconteceu com 6 gastos). O recibo é montado a partir do que as ferramentas REALMENTE
+# devolveram, não do texto do modelo, e vai no fim da resposta.
+# --------------------------------------------------------------------------- #
+_WRITE_LABELS = {
+    "create_task": "tarefa", "update_task": "tarefa", "complete_task": "tarefa",
+    "create_reminder": "lembrete", "delete_reminder": "lembrete",
+    "create_goal": "meta", "update_goal": "meta",
+    "add_step": "etapa", "update_step": "etapa", "complete_step": "etapa",
+    "log_expense": "gasto", "update_expense": "gasto", "delete_expense": "gasto",
+    "set_budget": "orçamento",
+    "create_calendar_event": "evento", "update_calendar_event": "evento",
+    "delete_calendar_event": "evento",
+}
+
+# Frases em que o modelo afirma que gravou algo.
+_CLAIM_RE = re.compile(
+    r"\b(lan[çc]ei|lan[çc]ad[oa]s?|registrei|registrad[oa]s?|gravei|gravad[oa]s?)\b", re.I
+)
+
+
+def receipt_for(name: str, output: str) -> Optional[tuple[bool, str]]:
+    """(ok, texto) para ferramentas que gravam; None para as de leitura."""
+    label = _WRITE_LABELS.get(name)
+    if not label:
+        return None
+    try:
+        data = json.loads(output)
+    except (ValueError, TypeError):
+        return (False, f"{label} ({name}: resposta ilegível)")
+    if not data.get("ok"):
+        return (False, f"{label} ({name}: {data.get('error', 'erro')})")
+    res = data.get("result")
+    if isinstance(res, dict):
+        if isinstance(res.get("id"), int):
+            return (True, f"{label} #{res['id']}")
+        if res.get("deleted") is True:
+            return (True, f"{label} removido")
+        if name == "set_budget" and res.get("category"):
+            return (True, f"orçamento {res['category']}")
+    if res is None and name.startswith(("update_", "complete_")):
+        return (False, f"{label} ({name}: não encontrado)")
+    return (True, label)
+
+
+def finalize_reply(text: str, receipts: list[tuple[bool, str]], warn_claims: bool = True) -> str:
+    """Acrescenta o recibo das gravações feitas no turno. Se o texto afirma ter gravado
+    mas nenhuma ferramenta de escrita rodou, avisa (só em conversa, não em jobs)."""
+    oks = [t for ok, t in receipts if ok]
+    fails = [t for ok, t in receipts if not ok]
+    extra: list[str] = []
+    if oks:
+        extra.append("🧾 Gravado agora: " + ", ".join(oks))
+    if fails:
+        extra.append("⚠️ Falhou: " + "; ".join(fails))
+    if not receipts and warn_claims and _CLAIM_RE.search(text):
+        extra.append(
+            "⚠️ Nenhuma gravação foi feita neste turno. Se acima eu disse que lancei/registrei "
+            "algo, não confie: me peça de novo."
+        )
+    return text + ("\n\n" + "\n".join(extra) if extra else "")
+
+
 def _dispatch(user_id: int, name: str, args: dict[str, Any]) -> Any:
     if name == "create_task":
         return db.create_task(
@@ -552,7 +648,23 @@ def _dispatch(user_id: int, name: str, args: dict[str, Any]) -> Any:
             amount=args["amount"],
             category=args.get("category"),
             description=args.get("description"),
+            # Data LOCAL por padrão (db.add_expense usaria UTC e viraria o dia à noite).
+            spent_on=args.get("spent_on") or _now_local_iso()[:10],
+            payment_method=args.get("payment_method"),
+            shared_with=args.get("shared_with"),
+            my_share=args.get("my_share"),
+        )
+    if name == "update_expense":
+        return db.update_expense(
+            user_id,
+            args["id"],
+            amount=args.get("amount"),
+            category=args.get("category"),
+            description=args.get("description"),
             spent_on=args.get("spent_on"),
+            payment_method=args.get("payment_method"),
+            shared_with=args.get("shared_with"),
+            my_share=args.get("my_share"),
         )
     if name == "get_expense_summary":
         month = args.get("month") or _now_local_iso()[:7]

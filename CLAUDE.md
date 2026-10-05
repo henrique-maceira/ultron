@@ -57,6 +57,17 @@ Idioma de todo texto voltado ao usuário e dos comentários: **português (BR)**
   (ALTER TABLE guardado por PRAGMA). Não há framework de migração — evolua com cuidado.
 - **Loop do cérebro:** `MAX_TOKENS=8192`; em `max_tokens` o loop RETOMA a geração e acumula
   o texto (antes truncava e respondia só "Ok."). Fallback vazio explícito, não silencioso.
+- **Recibo de gravação:** toda ferramenta que grava (`tools._WRITE_LABELS`) gera um recibo a
+  partir do resultado REAL; `tools.finalize_reply` o anexa à resposta ("🧾 Gravado agora:
+  gasto #16") e, em conversa (não em jobs), avisa se o texto diz "lancei/registrei" sem que
+  nenhuma gravação tenha ocorrido. Existe porque o Gemini já confirmou 6 gastos que nunca
+  foram gravados. Os dois cérebros usam o mesmo mecanismo (`_run_loop` -> `_loop`).
+- **Finanças:** `expenses` guarda `payment_method` (credito|debito|pix|dinheiro|vr|va;
+  `db.normalize_payment_method` aceita sinônimos), `shared_with` (ex.: 'noiva') e `my_share`
+  (`amount` é sempre o TOTAL desembolsado; ao dividir sem informar a parte, vale metade).
+  `budget_status` devolve também `por_forma_pagamento` e `divididos_com_terceiros`. Os três
+  "bolsos" são: dinheiro/conta, benefícios (VR/VA, só comida) e cartão de crédito (fatura).
+  Parcelas de compras antigas do cartão NÃO entram como gasto: são compromissos (a modelar).
 - **Proatividade:** `JobQueue` do `python-telegram-bot` (um só event loop, sem agendador
   extra).
 - **Fuso:** `America/Sao_Paulo`, via `zoneinfo` + pacote `tzdata`.
@@ -139,6 +150,14 @@ Dockerfile, docker-compose.yml, .dockerignore, data/.gitkeep   # deploy 24/7
   (volume `./data`). Se você rodar scripts de manutenção no host, garanta que o `.env`
   aponte para o **mesmo** arquivo (`DB_PATH=data/ultron.db`) — senão você escreve num
   `ultron.db` na raiz que o container não lê. Já quebrou um seed de metas assim.
+- **Gemini grátis tem cota DIÁRIA mínima:** `gemini-3.8-flash` no free tier permite só **20
+  requisições/dia por projeto** (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`) e cada
+  ida de ferramenta é uma requisição, então ~5 conversas já esgotam. `GeminiBrain` reconhece o
+  429 "PerDay" (`_QuotaExhausted`) e avisa com o tempo de espera, em vez de dizer
+  "congestionado". Alternativas: outro modelo/projeto, Claude via API (com cache de prompt) ou
+  usar o chat do Claude Code como sala de controle.
+- **Datas em `log_expense`:** sem `spent_on`, o handler usa a data LOCAL (`_now_local_iso`);
+  `db.add_expense` sozinho usaria UTC e viraria o dia à noite (já gerou gastos com 1 dia a mais).
 - **Google Agenda:** datas de negócio continuam ISO local ingênuo; a conversão p/ RFC3339
   com fuso acontece só na borda em `gcal.py`. Não importe libs do Google no topo dos módulos
   (mantenha lazy). Credenciais/token ficam em `data/` e **não** são versionados.

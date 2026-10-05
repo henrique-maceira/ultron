@@ -15,7 +15,8 @@ import asyncio
 import base64
 import json
 import logging
-from typing import Any
+import re
+from typing import Any, Optional
 
 from config import Config
 
@@ -28,6 +29,17 @@ logger = logging.getLogger(__name__)
 
 class _Overloaded(Exception):
     """Sinaliza que o modelo gratuito está indisponível após os retries."""
+
+
+class _QuotaExhausted(Exception):
+    """Cota DIÁRIA do tier gratuito esgotada (não adianta tentar de novo agora)."""
+
+    def __init__(self, retry_in: Optional[str] = None):
+        super().__init__(retry_in or "")
+        self.retry_in = retry_in
+
+
+_RETRY_IN_RE = re.compile(r"retry in\s+([0-9hms.]+)", re.I)
 
 
 MAX_OUTPUT_TOKENS = 8192
@@ -107,14 +119,20 @@ class GeminiBrain(Brain):
         ]
         contents.append(types.Content(role="user", parts=user_parts))
 
-        reply = await self._run_loop(user_id, contents)
+        reply = await self._run_loop(user_id, contents, warn_claims=persist)
 
         if persist:
             db.add_message(user_id, "user", persist_text)
             db.add_message(user_id, "assistant", reply)
         return reply
 
-    async def _run_loop(self, user_id: int, contents: list[Any]) -> str:
+    async def _run_loop(self, user_id: int, contents: list[Any], warn_claims: bool = True) -> str:
+        """Roda o loop e devolve a resposta já com o recibo das gravações do turno."""
+        receipts: list[tuple[bool, str]] = []
+        text = await self._loop(user_id, contents, receipts)
+        return tools.finalize_reply(text, receipts, warn_claims)
+
+    async def _loop(self, user_id: int, contents: list[Any], receipts: list) -> str:
         from google.genai import types
 
         system = system_prompt(self._config.tz, self._config.google_calendar_enabled)
@@ -128,6 +146,15 @@ class GeminiBrain(Brain):
         for _ in range(MAX_TOOL_ITERATIONS):
             try:
                 response = await self._generate(contents, config)
+            except _QuotaExhausted as q:
+                # "2h30m24.55s" -> "2h30m" (sem frações de segundo)
+                espera = re.sub(r"\d+(\.\d+)?s$", "", (q.retry_in or "").rstrip(".")) or q.retry_in
+                quando = f" Volta em ~{espera}." if espera else ""
+                return (
+                    "⚠️ Acabou a cota DIÁRIA do plano gratuito do Gemini (são só 20 requisições "
+                    f"por dia).{quando} Não é congestionamento. Para continuar agora, use o chat "
+                    "do Claude Code ou troque o provedor."
+                )
             except _Overloaded:
                 return OVERLOADED_FALLBACK
 
@@ -141,6 +168,9 @@ class GeminiBrain(Brain):
                 tool_parts = []
                 for fc in calls:
                     output = tools.execute_tool(user_id, fc.name, dict(fc.args or {}))
+                    receipt = tools.receipt_for(fc.name, output)
+                    if receipt:
+                        receipts.append(receipt)
                     try:
                         payload = json.loads(output)
                     except (ValueError, TypeError):
@@ -170,6 +200,11 @@ class GeminiBrain(Brain):
                     model=self._config.llm_model, contents=contents, config=config
                 )
             except errors.APIError as exc:
+                if getattr(exc, "code", None) == 429:
+                    detalhe = f"{exc} {getattr(exc, 'details', '')}"
+                    if "PerDay" in detalhe:  # cota diária: insistir só gasta mais requisições
+                        m = _RETRY_IN_RE.search(detalhe)
+                        raise _QuotaExhausted(m.group(1) if m else None) from exc
                 if getattr(exc, "code", None) not in RETRY_STATUSES:
                     raise
                 if attempt >= MAX_API_RETRIES - 1:

@@ -126,6 +126,10 @@ def init_db() -> None:
             """
         )
         _ensure_column(conn, "steps", "depends_on", "INTEGER")
+        # Finanças: forma de pagamento e divisão com outra pessoa (ex.: noiva).
+        _ensure_column(conn, "expenses", "payment_method", "TEXT")
+        _ensure_column(conn, "expenses", "shared_with", "TEXT")
+        _ensure_column(conn, "expenses", "my_share", "REAL")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
@@ -540,26 +544,93 @@ def goals_health(
 # --------------------------------------------------------------------------- #
 # Finanças: gastos (expenses) e orçamento (budgets)
 # --------------------------------------------------------------------------- #
+# Formas de pagamento canônicas. `normalize_payment_method` mapeia sinônimos para elas.
+PAYMENT_METHODS = ("credito", "debito", "pix", "dinheiro", "vr", "va")
+_PAYMENT_ALIASES = {
+    "credito": "credito", "crédito": "credito", "cartao": "credito", "cartão": "credito",
+    "cartao de credito": "credito", "cartão de crédito": "credito", "cartao credito": "credito",
+    "debito": "debito", "débito": "debito", "cartao de debito": "debito", "cartão de débito": "debito",
+    "pix": "pix", "dinheiro": "dinheiro", "especie": "dinheiro", "espécie": "dinheiro",
+    "vr": "vr", "vale refeicao": "vr", "vale refeição": "vr",
+    "va": "va", "vale alimentacao": "va", "vale alimentação": "va",
+}
+
+
+def normalize_payment_method(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    key = value.strip().lower()
+    if key not in _PAYMENT_ALIASES:
+        raise ValueError(
+            f"Forma de pagamento inválida: '{value}'. Use: {', '.join(PAYMENT_METHODS)}."
+        )
+    return _PAYMENT_ALIASES[key]
+
+
 def add_expense(
     user_id: int,
     amount: float,
     category: Optional[str] = None,
     description: Optional[str] = None,
     spent_on: Optional[str] = None,
+    payment_method: Optional[str] = None,
+    shared_with: Optional[str] = None,
+    my_share: Optional[float] = None,
 ) -> dict[str, Any]:
-    """Registra um gasto. `spent_on` é a data local (YYYY-MM-DD); sem ela, usa hoje UTC."""
+    """Registra um gasto. `amount` é o valor TOTAL pago. `spent_on` é a data local
+    (YYYY-MM-DD); sem ela usa hoje em UTC (os handlers passam a data local).
+
+    Se `shared_with` (ex.: 'noiva') for informado e `my_share` não, a parte do usuário
+    é metade do valor."""
     now = _utc_now()
     if not spent_on:
         spent_on = now[:10]
     spent_on = spent_on[:10]  # normaliza para só a data
+    method = normalize_payment_method(payment_method)
+    if shared_with and my_share is None:
+        my_share = round(float(amount) / 2, 2)
     with _conn() as conn:
         cur = conn.execute(
-            """INSERT INTO expenses (user_id, amount, category, description, spent_on, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (user_id, float(amount), category, description, spent_on, now),
+            """INSERT INTO expenses (user_id, amount, category, description, spent_on, created_at,
+                                     payment_method, shared_with, my_share)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, float(amount), category, description, spent_on, now,
+             method, shared_with, my_share),
         )
         row = conn.execute("SELECT * FROM expenses WHERE id = ?", (cur.lastrowid,)).fetchone()
         return dict(row)
+
+
+def update_expense(user_id: int, expense_id: int, **fields: Any) -> Optional[dict[str, Any]]:
+    """Corrige campos de um gasto (valor, categoria, descrição, data, forma de pagamento,
+    divisão). Passar None ignora o campo."""
+    allowed = {"amount", "category", "description", "spent_on", "payment_method",
+               "shared_with", "my_share"}
+    updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+    if "payment_method" in updates:
+        updates["payment_method"] = normalize_payment_method(updates["payment_method"])
+    if "spent_on" in updates:
+        updates["spent_on"] = str(updates["spent_on"])[:10]
+    # Marcar divisão sem informar a parte => metade do valor (usa o valor novo, se houver).
+    if updates.get("shared_with") and "my_share" not in updates:
+        with _conn() as conn:
+            cur_row = conn.execute(
+                "SELECT amount, my_share FROM expenses WHERE id = ? AND user_id = ?",
+                (expense_id, user_id),
+            ).fetchone()
+        if cur_row and cur_row["my_share"] is None:
+            updates["my_share"] = round(float(updates.get("amount", cur_row["amount"])) / 2, 2)
+    with _conn() as conn:
+        if updates:
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            conn.execute(
+                f"UPDATE expenses SET {set_clause} WHERE id = ? AND user_id = ?",
+                list(updates.values()) + [expense_id, user_id],
+            )
+        row = conn.execute(
+            "SELECT * FROM expenses WHERE id = ? AND user_id = ?", (expense_id, user_id)
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def list_expenses(
@@ -628,6 +699,20 @@ def budget_status(user_id: int, year_month: str) -> dict[str, Any]:
                GROUP BY COALESCE(category, 'sem_categoria')""",
             (user_id, ym),
         ).fetchall()
+        por_forma = conn.execute(
+            """SELECT COALESCE(payment_method, 'nao_informado') AS forma,
+                      SUM(amount) AS pago,
+                      SUM(COALESCE(my_share, amount)) AS minha_parte
+               FROM expenses WHERE user_id = ? AND substr(spent_on, 1, 7) = ?
+               GROUP BY COALESCE(payment_method, 'nao_informado')""",
+            (user_id, ym),
+        ).fetchall()
+        divididos = conn.execute(
+            """SELECT SUM(amount) AS pago, SUM(COALESCE(my_share, amount)) AS minha_parte
+               FROM expenses WHERE user_id = ? AND substr(spent_on, 1, 7) = ?
+                     AND shared_with IS NOT NULL""",
+            (user_id, ym),
+        ).fetchone()
         limites = {b["category"]: b["monthly_limit"] for b in list_budgets(user_id)}
 
     gasto_por_cat = {g["category"]: g["gasto"] for g in gastos}
@@ -652,6 +737,16 @@ def budget_status(user_id: int, year_month: str) -> dict[str, Any]:
         "total_gasto": round(total_gasto, 2),
         "total_orcamento": round(total_limite, 2) if total_limite else None,
         "por_categoria": linhas,
+        # Quanto saiu de cada "bolso" (cartão, VR/VA, débito...) e a parte que é do usuário
+        # nos gastos divididos com a noiva (pago = total desembolsado).
+        "por_forma_pagamento": [
+            {"forma": r["forma"], "pago": round(r["pago"], 2), "minha_parte": round(r["minha_parte"], 2)}
+            for r in por_forma
+        ],
+        "divididos_com_terceiros": {
+            "pago": round(divididos["pago"] or 0.0, 2),
+            "minha_parte": round(divididos["minha_parte"] or 0.0, 2),
+        },
     }
 
 
