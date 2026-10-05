@@ -14,6 +14,10 @@ data/google_token.json
 *.seeded-bak
 *.empty-bak
 
+# Conteúdo local de data/ (db, tokens, diário com dados pessoais) — só .gitkeep é versionado
+data/*
+!data/.gitkeep
+
 # Python
 __pycache__/
 *.py[cod]
