@@ -25,6 +25,9 @@ class Config:
     google_credentials_path: str
     google_token_path: str
     google_calendar_id: str
+    # Quando True, o bot do Telegram só ENVIA avisos (lembretes, resumos); mensagens que o
+    # dono manda ao bot recebem um redirecionamento fixo, sem chamar a IA.
+    notices_only: bool = False
 
     @property
     def tz(self) -> ZoneInfo:
@@ -69,4 +72,5 @@ def load_config() -> Config:
         google_credentials_path=os.getenv("GOOGLE_CREDENTIALS_PATH", "data/google_credentials.json"),
         google_token_path=os.getenv("GOOGLE_TOKEN_PATH", "data/google_token.json"),
         google_calendar_id=os.getenv("GOOGLE_CALENDAR_ID", "primary"),
+        notices_only=_as_bool("NOTICES_ONLY", False),
     )

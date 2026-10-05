@@ -158,6 +158,17 @@ Dockerfile, docker-compose.yml, .dockerignore, data/.gitkeep   # deploy 24/7
   usar o chat do Claude Code como sala de controle.
 - **Datas em `log_expense`:** sem `spent_on`, o handler usa a data LOCAL (`_now_local_iso`);
   `db.add_expense` sozinho usaria UTC e viraria o dia à noite (já gerou gastos com 1 dia a mais).
+- **Token do Google expira em 7 dias em app OAuth no modo "Teste":** o refresh token morre
+  (`invalid_grant: Token has been expired or revoked`) e TODA ferramenta de agenda falha, do
+  bot e do chat, sem aviso (aconteceu entre 29/09 e 05/10). `gcal._load_credentials` agora
+  levanta `CalendarNotConfigured` com instrução clara. Correção definitiva: publicar o app
+  ("Em produção") no Google Cloud Console ANTES de rodar `scripts/gcal_auth.py`; token emitido
+  em modo Teste continua com validade de 7 dias.
+- **Modo só avisos (`NOTICES_ONLY=true`, padrão do dono desde 05/10):** o bot apenas ENVIA
+  lembretes/resumos/relatórios; texto, foto e documento recebidos ganham um redirecionamento
+  fixo, sem chamar a IA nem baixar o arquivo (poupa a cota do Gemini grátis). Conversa,
+  registro de gastos e ajustes de plano acontecem no chat do Claude Code. Reverter:
+  `NOTICES_ONLY=false` + `docker compose up -d --build`.
 - **Google Agenda:** datas de negócio continuam ISO local ingênuo; a conversão p/ RFC3339
   com fuso acontece só na borda em `gcal.py`. Não importe libs do Google no topo dos módulos
   (mantenha lazy). Credenciais/token ficam em `data/` e **não** são versionados.

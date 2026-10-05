@@ -64,6 +64,18 @@ HELP = (
 )
 
 
+# Modo "só avisos" (NOTICES_ONLY=true): o bot apenas envia lembretes e resumos.
+NOTICES_WELCOME = (
+    "🔔 Oi! Aqui eu sou o canal de *avisos* do Ultron: lembretes, resumo da manhã e "
+    "relatórios chegam por aqui.\n\n"
+    "Para conversar, registrar gastos ou ajustar o plano, use o chat do Claude Code."
+)
+NOTICES_REPLY = (
+    "🔔 Este bot só envia avisos. Para responder, registrar gastos ou ajustar o plano, "
+    "fale no chat do Claude Code — lá eu aplico na hora."
+)
+
+
 def _split_message(text: str, limit: int = TELEGRAM_MAX) -> list[str]:
     """Divide mensagens longas em pedaços respeitando o limite do Telegram."""
     if len(text) <= limit:
@@ -94,18 +106,23 @@ def build_application(config: Config, brain: Brain) -> Application:
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _is_owner(update):
             return
-        await update.message.reply_text(WELCOME, parse_mode="Markdown")
+        text = NOTICES_WELCOME if config.notices_only else WELCOME
+        await update.message.reply_text(text, parse_mode="Markdown")
 
     async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _is_owner(update):
             return
-        await update.message.reply_text(HELP, parse_mode="Markdown")
+        text = NOTICES_WELCOME if config.notices_only else HELP
+        await update.message.reply_text(text, parse_mode="Markdown")
 
     async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _is_owner(update):
             await update.message.reply_text(
                 "Este é um assistente pessoal e privado. 🙏"
             )
+            return
+        if config.notices_only:  # sem IA: não gasta a cota do modelo
+            await update.message.reply_text(NOTICES_REPLY)
             return
 
         user_id = update.effective_user.id
@@ -139,6 +156,9 @@ def build_application(config: Config, brain: Brain) -> Application:
     async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _is_owner(update):
             return
+        if config.notices_only:  # nem baixa o arquivo
+            await update.message.reply_text(NOTICES_REPLY)
+            return
         photo = update.message.photo[-1]  # maior resolução disponível
         if photo.file_size and photo.file_size > MAX_IMAGE_BYTES:
             await update.message.reply_text("Essa imagem é grande demais (máx. ~5 MB).")
@@ -155,6 +175,9 @@ def build_application(config: Config, brain: Brain) -> Application:
 
     async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _is_owner(update):
+            return
+        if config.notices_only:  # nem baixa o arquivo
+            await update.message.reply_text(NOTICES_REPLY)
             return
         doc = update.message.document
         mime = (doc.mime_type or "").lower()

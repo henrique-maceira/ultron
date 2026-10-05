@@ -73,7 +73,17 @@ def _load_credentials():
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        from google.auth.exceptions import RefreshError  # lazy
+
+        try:
+            creds.refresh(Request())
+        except RefreshError as exc:
+            # Típico de app OAuth em modo "Teste": o refresh token expira em 7 dias.
+            raise CalendarNotConfigured(
+                "A autorização do Google Agenda expirou (invalid_grant). É preciso reautorizar: "
+                "rode `python scripts/gcal_auth.py` no computador. Para não expirar de novo, "
+                "publique o app OAuth ('Em produção') no Google Cloud Console antes."
+            ) from exc
         # Persiste o token renovado para próximos usos.
         with open(_TOKEN_PATH, "w", encoding="utf-8") as fh:
             fh.write(creds.to_json())
